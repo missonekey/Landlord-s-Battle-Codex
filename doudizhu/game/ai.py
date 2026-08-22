@@ -53,6 +53,7 @@ def _safe_single(rank: int, remaining: dict) -> bool:
     return all(remaining.get(r, 0) == 0 for r in range(rank + 1, 18))
 
 
+
 def _break_penalty(rank: int, count: int) -> float:
     """拆牌代价：拆对 +1.1，拆三张 +2.2，拆炸弹 +8。"""
     if count >= 4:
@@ -187,7 +188,7 @@ def suggest_lead(hand, ctx: Optional[dict] = None) -> List[int]:
 
     # 2) 队友快走完了，喂牌
     teammate_left = ctx.get("teammate_left")
-    if ctx.get("role") == "farmer" and teammate_left is not None and teammate_left <= 2:
+    if ctx.get("role") == "farmer" and teammate_left is not None and teammate_left <= 3:
         s = _smallest_single(hand, counts, ids)
         if s:
             return s
@@ -263,7 +264,7 @@ def _gen_beats(hand, target: rules.Combo, ctx: dict):
     ids = _ids_by_rank(hand)
     my_left = len(hand)
     opp_min = ctx.get("opp_min", 99)
-    desperate = ctx.get("desperate", False) or my_left <= 5 or opp_min <= 5
+    desperate = ctx.get("desperate", False) or my_left <= 6 or opp_min <= 7
     t = target.type
     t_main = target.main_rank
     out = []
@@ -462,15 +463,15 @@ def suggest_follow(hand, target: rules.Combo, ctx: Optional[dict] = None) -> Opt
     landlord_left = ctx.get("landlord_left", 99)
     opp_min = ctx.get("opp_min", 99)
     if ctx.get("role") == "farmer":
-        if landlord_left <= 2:
+        if landlord_left <= 6:
             return best_cards
-        if best_cost <= 5.0:
+        if best_cost <= 6.0:
             return best_cards
         return None
     # 地主
-    if opp_min <= 2:
+    if opp_min <= 4:
         return best_cards
-    if best_cost <= 5.0:
+    if best_cost <= 6.0:
         return best_cards
     return None
 

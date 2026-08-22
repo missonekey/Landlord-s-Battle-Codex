@@ -200,6 +200,34 @@
   setTimeout(loadVoices, 300);
   setTimeout(loadVoices, 1500);
 
+  /* 胜利喝彩：彩带飘落 + 欢呼语音 */
+  function celebrateWin() {
+    try {
+      if (document.createElement && document.body) {
+        var layer = document.createElement('div');
+        layer.className = 'confetti-layer';
+        var colors = ['#ffd76a', '#ff8a5e', '#7ee08a', '#8ecbff',
+                      '#f5a623', '#e0483c', '#b980ff', '#ffffff'];
+        for (var i = 0; i < 90; i++) {
+          var piece = document.createElement('div');
+          piece.className = 'confetti-piece';
+          piece.style.left = (Math.random() * 100) + 'vw';
+          piece.style.background = colors[i % colors.length];
+          piece.style.width = (6 + Math.random() * 8) + 'px';
+          piece.style.height = (10 + Math.random() * 10) + 'px';
+          piece.style.animationDuration = (2.2 + Math.random() * 2.2) + 's';
+          piece.style.animationDelay = (Math.random() * 0.7) + 's';
+          layer.appendChild(piece);
+        }
+        document.body.appendChild(layer);
+        setTimeout(function () {
+          if (layer.parentNode) layer.parentNode.removeChild(layer);
+        }, 6000);
+      }
+    } catch (e) {}
+    speak('太棒了！你赢了！');
+  }
+
   function announcePlay(lp) {
     if (!lp) return;   // 槽位清空（新一轮开始）不播报
     if (lp.passed) {
@@ -247,12 +275,48 @@
   function render() {
     if (!state) return;
     renderTopbar();
+    renderWelcome();
+    var over = state.phase === 'round_over';
     renderBidEvent();
-    renderSeats();
-    renderCenter();
-    renderHand();
+    renderSeats(over);
+    renderCenter(over);
+    if (over) {
+      clearHand();
+    } else {
+      renderHand();
+    }
     renderControls();
     renderResult();
+  }
+
+  var welcomeDismissed = false;
+
+  // 游戏是否"全新未开始"（发牌后尚无人叫分）
+  function isFreshGame() {
+    return state && state.phase === 'bidding' && state.bid_highest === 0 && !state.bidder;
+  }
+
+  function renderWelcome() {
+    var el = $('welcomeModal');
+    if (welcomeDismissed || !isFreshGame()) {
+      if (!el.classList.contains('hidden')) el.classList.add('hidden');
+    } else {
+      el.classList.remove('hidden');
+    }
+  }
+
+  $('btnStartGame').addEventListener('click', function () {
+    welcomeDismissed = true;
+    $('welcomeModal').classList.add('hidden');
+  });
+
+  // 结算时清空手牌（减少残留）
+  function clearHand() {
+    if (handCardsSig !== '') {
+      handCardsSig = '';
+      handSelSig = '';
+      $('hand').innerHTML = '';
+    }
   }
 
   var lastRoundInfo = '';
@@ -279,7 +343,7 @@
     if (mb !== lastMultBadge) { lastMultBadge = mb; $('multBadge').textContent = mb; }
   }
 
-  function renderSeats() {
+  function renderSeats(over) {
     var base = ['seat seat-player', 'seat seat-right', 'seat seat-left'];
     for (var p = 0; p < 3; p++) {
       var active = (state.phase === 'bidding' || state.phase === 'playing') && state.turn === p;
@@ -323,7 +387,14 @@
           ? DDZ.landlordAvatar() : DDZ.farmerAvatar();
       }
 
-      // 最近出牌（中央对战区槽位）
+      // 最近出牌（中央对战区槽位）；结算时清空（减少残留）
+      if (over) {
+        if (lastPlaySigs[p] !== '') {
+          lastPlaySigs[p] = '';
+          $('lastPlay' + p).innerHTML = '';
+        }
+        continue;
+      }
       var lp = state.last_plays[p];
       var sig = lp ? (lp.passed ? 'P' : lp.cards.join(',')) : '';
       if (sig !== lastPlaySigs[p]) {
@@ -346,7 +417,7 @@
     if (hc !== lastHandCount) { lastHandCount = hc; $('handCount').textContent = hc; }
   }
 
-  function renderCenter() {
+  function renderCenter(over) {
     var st = $('status');
     var statusHtml;
     if (state.phase === 'bidding') {
@@ -374,13 +445,20 @@
       st.innerHTML = statusHtml;
     }
 
-    // 底牌（地主确定后翻开）
-    var bSig = (state.bottom_visible ? 'V' : 'H') + state.bottom.map(function (c) { return c.id; }).join(',');
-    if (bSig !== lastBottomSig) {
-      lastBottomSig = bSig;
-      $('bottomCards').innerHTML = state.bottom.map(function (c) {
-        return '<span class="mini anim">' + DDZ.cardSVG(c.id, !state.bottom_visible) + '</span>';
-      }).join('');
+    // 底牌（地主确定后翻开）；结算时清空（减少残留）
+    if (over) {
+      if (lastBottomSig !== '') {
+        lastBottomSig = '';
+        $('bottomCards').innerHTML = '';
+      }
+    } else {
+      var bSig = (state.bottom_visible ? 'V' : 'H') + state.bottom.map(function (c) { return c.id; }).join(',');
+      if (bSig !== lastBottomSig) {
+        lastBottomSig = bSig;
+        $('bottomCards').innerHTML = state.bottom.map(function (c) {
+          return '<span class="mini anim">' + DDZ.cardSVG(c.id, !state.bottom_visible) + '</span>';
+        }).join('');
+      }
     }
 
     // 倍数构成
@@ -511,6 +589,7 @@
     parts.push('累计比分：你 ' + state.scores[0] + '　上家 ' + state.scores[2] + '　下家 ' + state.scores[1]);
     $('resultBody').innerHTML = parts.map(function (p) { return '<div>' + p + '</div>'; }).join('');
     $('resultModal').classList.remove('hidden');
+    if (win) celebrateWin();
   }
 
   /* ---------------- 交互 ---------------- */
@@ -675,8 +754,15 @@
   function newRound() {
     postAction({ action: 'new_round' }).then(function (res) {
       selection = new Set();
+      // 重置所有渲染缓存，确保新一局全新渲染、无上一局残留
       lastPlaySigs = ['', '', ''];
+      lastSeatState = [null, null, null];
       lastBottomSig = '';
+      lastStatusHtml = '';
+      lastMultRowHtml = '';
+      lastLogLine = '';
+      lastHandCount = '';
+      lastBidEventSig = '';
       handCardsSig = '';
       handSelSig = '';
       if (res.state) { state = res.state; render(); }

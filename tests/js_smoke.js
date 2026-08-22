@@ -178,6 +178,19 @@ try {
   check(readFile("doudizhu/game/index.html").indexOf("bid-big") >= 0
         && readFile("doudizhu/game/css/style.css").indexOf("bid-big") >= 0,
         "叫分按钮放大样式定义");
+  // ---- 开始游戏弹窗 ----
+  check(els.welcomeModal.classList.contains("hidden"), "已叫分时不再显示开始弹窗");
+  var wf = JSON.parse(JSON.stringify(currentState));
+  wf.bid_highest = 0;
+  wf.bidder = null;
+  wf.phase = 'bidding';
+  currentState = wf;
+  _pollFn();
+  check(!els.welcomeModal.classList.contains("hidden"), "全新未开始时显示开始弹窗");
+  els.btnStartGame.fire("click");
+  check(els.welcomeModal.classList.contains("hidden"), "点击开始游戏后弹窗关闭");
+  currentState = readJson("tests/snapshots/bidding.json");
+  _pollFn();
   els.btnBid2.fire("click");
   detail.push("  ✓ 点击 2分 按钮无异常");
   els.btnBid1.fire("click"); // 第二次点击（服务端会拒绝，但前端不应崩溃）
@@ -408,6 +421,17 @@ try {
   check(els["avatar" + f1].innerHTML.indexOf("e6b84a") >= 0 &&
         els["avatar" + f2].innerHTML.indexOf("e6b84a") >= 0,
         "农民头像显示农民形象（草帽）");
+
+  // ---- 玩家胜利：播放喝彩（语音断言；彩带为纯视觉特效） ----
+  var winState = JSON.parse(JSON.stringify(currentState));
+  winState.version = 99;   // 新版本触发结算渲染
+  winState.winners = [0];
+  winState.landlord = 0;   // 玩家是地主且获胜
+  currentState = winState;
+  _pollFn();
+  check(els.resultTitle.textContent.indexOf("你赢了") >= 0, "玩家胜利标题");
+  check(window.speechSynthesis._last === "太棒了！你赢了！",
+        "玩家胜利播放喝彩语音，实际: " + window.speechSynthesis._last);
   els.btnAgain.fire("click");
   detail.push("  ✓ 再来一局无异常");
   els.btnCloseResult.fire("click");
