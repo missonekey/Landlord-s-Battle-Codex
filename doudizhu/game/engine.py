@@ -60,6 +60,7 @@ class Game:
         self.pass_count = 0
         self.bid_points = 0
         self.landlord: Optional[int] = None
+        self.bid_event: Optional[dict] = None   # 最近一次叫分事件（供前端语音播报）
 
         self.last_combo: Optional[rules.Combo] = None
         self.last_player: Optional[int] = None
@@ -101,17 +102,20 @@ class Game:
 
         if value == 0:
             self.pass_count += 1
+            self.bid_event = {"kind": "pass", "player": player}
             self._log("%s 不叫。" % PLAYER_NAMES[player])
         else:
             self.bid_highest = value
             self.bidder = player
             self.pass_count = 0
+            self.bid_event = {"kind": "bid", "bid": value, "player": player}
             self._log("%s 叫 %d 分。" % (PLAYER_NAMES[player], value))
 
         if self.pass_count == 3:
             self._log("三家都不叫，重新发牌。")
             if self.deal_no >= MAX_DEALS_PER_ROUND:
                 raise RuntimeError("重新发牌次数过多")
+            self.bid_event = {"kind": "redeal"}
             self._deal()
             return
 
@@ -121,6 +125,7 @@ class Game:
             self.hands[self.landlord] = sort_hand(self.hands[self.landlord] + self.bottom)
             self.phase = PHASE_PLAYING
             self.turn = self.landlord
+            self.bid_event = {"kind": "landlord", "bid": self.bid_points, "player": self.landlord}
             self._log("%s 成为地主（%d 分），底牌：%s。"
                       % (PLAYER_NAMES[self.landlord], self.bid_points,
                          " ".join(card_name(c) for c in self.bottom)))
@@ -312,6 +317,7 @@ class Game:
             "bid": self.bid_points,
             "bid_highest": self.bid_highest,
             "bidder": self.bidder,
+            "bid_event": self.bid_event,
             "starter": self.starter,
             "turn": self.turn,
             "human": self.human,
@@ -343,8 +349,6 @@ class Game:
             "winners": self.winners,
             "round_result": self.round_result,
             "plays_count": list(self.plays_count),
-            "remaining": {r: (1 if r >= RANK_JOKER_SMALL else 4) - self.played_ranks[r]
-                          for r in range(3, RANK_JOKER_BIG + 1)},
             "log": list(self.log[-8:]),
         }
         return d

@@ -87,12 +87,51 @@
     return '<svg viewBox="0 0 100 140" class="card-svg" aria-hidden="true">' + inner + '</svg>';
   }
 
+  /* 地主头像：红色瓜皮帽 + 金珠 + 得意大笑 + 小胡子 */
+  function landlordAvatarSVG() {
+    return '<svg viewBox="0 0 100 100" class="avatar-svg" aria-hidden="true">' +
+      '<circle cx="50" cy="50" r="49" fill="#7e2b23"/>' +
+      '<circle cx="50" cy="50" r="45" fill="#a83a2c"/>' +
+      '<path d="M27 41 Q27 16 50 16 Q73 16 73 41 Q50 33 27 41 Z" fill="#c0392b"/>' +
+      '<rect x="25" y="38" width="50" height="8" rx="4" fill="#8e2b20"/>' +
+      '<rect x="25" y="38" width="50" height="3.5" rx="1.75" fill="#ffd76a"/>' +
+      '<circle cx="50" cy="15" r="5.5" fill="#ffd76a"/>' +
+      '<circle cx="50" cy="62" r="21" fill="#f6d9ae"/>' +
+      '<path d="M39 53 Q44 49 49 53" stroke="#3a2b20" stroke-width="2.4" fill="none" stroke-linecap="round"/>' +
+      '<path d="M51 53 Q56 49 61 53" stroke="#3a2b20" stroke-width="2.4" fill="none" stroke-linecap="round"/>' +
+      '<circle cx="44" cy="60" r="2.7" fill="#3a2b20"/>' +
+      '<circle cx="56" cy="60" r="2.7" fill="#3a2b20"/>' +
+      '<path d="M41 68 Q50 77 59 68 Q50 71 41 68 Z" fill="#7e4431"/>' +
+      '<path d="M44 70 Q50 74 56 70" stroke="#7e4431" stroke-width="2" fill="none" stroke-linecap="round"/>' +
+      '<path d="M42 73 Q50 77 58 73" stroke="#4a3526" stroke-width="2.6" fill="none" stroke-linecap="round"/>' +
+      '</svg>';
+  }
+
+  /* 农民头像：草帽 + 微笑 + 腮红 */
+  function farmerAvatarSVG() {
+    return '<svg viewBox="0 0 100 100" class="avatar-svg" aria-hidden="true">' +
+      '<circle cx="50" cy="50" r="49" fill="#6e5a2c"/>' +
+      '<circle cx="50" cy="50" r="45" fill="#7d6a3a"/>' +
+      '<ellipse cx="50" cy="40" rx="39" ry="11" fill="#e6b84a"/>' +
+      '<path d="M33 38 Q33 12 50 12 Q67 12 67 38 Q50 30 33 38 Z" fill="#d9a63a"/>' +
+      '<rect x="33" y="34.5" width="34" height="6" rx="3" fill="#b5812c"/>' +
+      '<circle cx="50" cy="63" r="21" fill="#f6d9ae"/>' +
+      '<circle cx="44" cy="60" r="2.7" fill="#3a2b20"/>' +
+      '<circle cx="56" cy="60" r="2.7" fill="#3a2b20"/>' +
+      '<path d="M43 68 Q50 73 57 68" stroke="#8c5a3a" stroke-width="2.6" fill="none" stroke-linecap="round"/>' +
+      '<circle cx="37" cy="66" r="4" fill="#f2a48b" opacity="0.85"/>' +
+      '<circle cx="63" cy="66" r="4" fill="#f2a48b" opacity="0.85"/>' +
+      '</svg>';
+  }
+
   window.DDZ = {
     cardSVG: cardSVG,
     backSVG: function () { return '<svg viewBox="0 0 100 140" class="card-svg" aria-hidden="true">' + backSVG() + '</svg>'; },
     cardInfo: cardInfo,
     rankName: rankName,
     RANK_TEXT: RANK_TEXT,
-    SUIT_TEXT: SUIT_TEXT
+    SUIT_TEXT: SUIT_TEXT,
+    landlordAvatar: landlordAvatarSVG,
+    farmerAvatar: farmerAvatarSVG
   };
 })();

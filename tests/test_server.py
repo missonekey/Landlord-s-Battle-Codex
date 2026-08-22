@@ -69,7 +69,7 @@ class ServerTestCase(unittest.TestCase):
         s = self.get_state()
         for key in ("version", "phase", "hands", "hand_counts", "scores",
                     "bottom", "turn", "human_turn", "last_plays", "settings",
-                    "remaining", "log"):
+                    "log"):
             self.assertIn(key, s)
         self.assertEqual(s["hand_counts"], [17, 17, 17])
         self.assertEqual(len(s["hands"]["0"]), 17)
@@ -141,11 +141,9 @@ class ServerTestCase(unittest.TestCase):
 
     def test_settings(self):
         self.post({"action": "set_delay", "ms": 250})
-        self.post({"action": "set_counter", "show": False})
         self.post({"action": "set_auto", "on": True})
         s = self.get_state()
         self.assertEqual(s["settings"]["bot_delay_ms"], 250)
-        self.assertFalse(s["settings"]["show_counter"])
         self.assertTrue(s["settings"]["auto_pilot"])
 
     def test_full_game_autopilot(self):

@@ -15,6 +15,15 @@
   var lastBottomSig = '';
   var lastErrorToastAt = 0;
 
+  // 游戏声音总开关：语音播报 + 按钮音效（默认开启，localStorage 持久化）
+  var voiceEnabled = true;
+  var voiceReady = false;   // 首次状态同步后置 true（跳过刷新时的历史出牌播报）
+  try {
+    if (typeof localStorage !== 'undefined' && localStorage.getItem('ddz_voice') === '0') {
+      voiceEnabled = false;
+    }
+  } catch (e) {}
+
   var NAME = ['你', '下家', '上家'];
 
   /* ---------------- 网络 ---------------- */
@@ -38,6 +47,7 @@
     getState().then(function (s) {
       state = s;
       render();
+      voiceReady = true;
     }).catch(function () {
       var now = Date.now();
       if (now - lastErrorToastAt > 5000) {
@@ -77,11 +87,167 @@
     return w !== state.landlord;   // 农民阵营获胜
   }
 
+  /* ---------------- 语音播报 ---------------- */
+
+  // 牌值 → 斗地主术语念法（J=勾、Q=圈、K=凯、A=尖）
+  var RANK_SPEAK = {
+    3: '三', 4: '四', 5: '五', 6: '六', 7: '七', 8: '八', 9: '九', 10: '十',
+    11: '勾', 12: '圈', 13: '凯', 14: '尖', 15: '二', 16: '小王', 17: '大王'
+  };
+
+  function comboSpeech(type, mainRank) {
+    switch (type) {
+      case 'single': return RANK_SPEAK[mainRank];
+      case 'pair': return '对' + RANK_SPEAK[mainRank];
+      case 'triple': return '三个' + RANK_SPEAK[mainRank];
+      case 'triple_single': return '三带一';
+      case 'triple_pair': return '三带二';
+      case 'straight': return '顺子';
+      case 'pair_chain': return '连对';
+      case 'airplane': return '飞机';
+      case 'airplane_single': return '飞机带翅膀';
+      case 'airplane_pair': return '飞机带翅膀';
+      case 'four_two_single': return '四带二';
+      case 'four_two_pair': return '四带两对';
+      case 'bomb': return '炸弹';
+      case 'rocket': return '王炸';
+      default: return '';
+    }
+  }
+
+  /* 叫分事件 → 语音文本（腾讯斗地主风格） */
+  function bidSpeech(ev) {
+    if (!ev) return '';
+    switch (ev.kind) {
+      case 'bid': return ['', '一分', '两分', '三分'][ev.bid] || '叫分';
+      case 'pass': return '不叫';
+      case 'landlord': return '抢地主';
+      case 'redeal': return '重新发牌';
+      default: return '';
+    }
+  }
+
+  function speak(text) {
+    if (!text || !voiceEnabled) return;
+    try {
+      if (!window.speechSynthesis || !window.SpeechSynthesisUtterance) return;
+      window.speechSynthesis.cancel();   // 打断上一条，避免连续出牌时语音堆积
+      var u = new window.SpeechSynthesisUtterance(text);
+      var v = pickVoice();
+      if (v) u.voice = v;
+      u.lang = 'zh-CN';
+      // 语气微调：炸弹/王炸沉稳有力，普通出牌稍快利落
+      if (text === '炸弹' || text === '王炸') {
+        u.rate = 0.92;
+        u.pitch = 0.85;
+      } else {
+        u.rate = 1.08;
+        u.pitch = 1.0;
+      }
+      window.speechSynthesis.speak(u);
+    } catch (e) {}
+  }
+
+  /* 选择系统里最自然的中文语音（跨平台：自动探测 + 择优 + 兜底，不依赖特定系统） */
+  var voicesCache = [];
+  var voicesLoaded = false;
+
+  function loadVoices() {
+    try {
+      if (!window.speechSynthesis) return;
+      var v = window.speechSynthesis.getVoices();
+      if (v && v.length) {
+        voicesCache = v;
+        voicesLoaded = true;
+      }
+    } catch (e) {}
+  }
+
+  // 识别中文语音（覆盖 zh / zh-CN / zh_CN / cmn 普通话 / yue 粤语等语言码）
+  function isChineseVoice(v) {
+    var l = (v && v.lang ? String(v.lang) : '').toLowerCase();
+    return l.indexOf('zh') === 0 || l.indexOf('cmn') === 0 || l.indexOf('yue') === 0;
+  }
+
+  function pickVoice() {
+    if (!voicesCache.length) return null;
+    // 1) 名字命中常见自然中文语音（跨平台启发，含 macOS/Windows/Edge/Chrome/Android）
+    var pref = ['meijia', 'ting-ting', 'tingting', 'sinji', 'yu-shu',
+                'xiaoxiao', 'xiaoyi', 'yunxi', 'xiaohan',
+                'google 普通话', '普通话', 'siri'];
+    for (var i = 0; i < pref.length; i++) {
+      for (var j = 0; j < voicesCache.length; j++) {
+        var v = voicesCache[j];
+        var nm = (v.name || '').toLowerCase();
+        if (nm.indexOf(pref[i]) >= 0 && isChineseVoice(v)) return v;
+      }
+    }
+    // 2) 本地中文语音优先（离线可用、更稳定）
+    var zh = [];
+    for (var j = 0; j < voicesCache.length; j++) {
+      if (isChineseVoice(voicesCache[j])) zh.push(voicesCache[j]);
+    }
+    for (var j = 0; j < zh.length; j++) { if (zh[j].localService) return zh[j]; }
+    // 3) 兜底：任意中文语音
+    return zh[0] || null;
+  }
+
+  // 初始化 + voiceschanged 事件 + 延迟重试（不同浏览器 voices 加载时机差异很大）
+  loadVoices();
+  if (window.speechSynthesis) {
+    window.speechSynthesis.onvoiceschanged = loadVoices;
+  }
+  setTimeout(loadVoices, 300);
+  setTimeout(loadVoices, 1500);
+
+  function announcePlay(lp) {
+    if (!lp) return;   // 槽位清空（新一轮开始）不播报
+    if (lp.passed) {
+      speak('要不起');
+    } else {
+      speak(comboSpeech(lp.type, lp.main_rank));
+    }
+  }
+
+  /* 按钮点击音效（Web Audio 合成短促清脆声，零资源文件） */
+  var audioCtx = null;
+
+  function playClickSound(freq) {
+    if (!voiceEnabled) return;
+    try {
+      var AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return;
+      if (!audioCtx) audioCtx = new AC();
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+      var osc = audioCtx.createOscillator();
+      var gain = audioCtx.createGain();
+      osc.type = 'triangle';
+      osc.frequency.value = freq || 760;
+      gain.gain.setValueAtTime(0.25, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.08);
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.08);
+    } catch (e) {}
+  }
+
+  // 事件委托：任意按钮点击都播放音效（主按钮/叫分按钮音调略高）
+  document.addEventListener('click', function (e) {
+    var btn = e.target && typeof e.target.closest === 'function'
+      ? e.target.closest('button') : null;
+    if (!btn || btn.disabled) return;
+    var primary = btn.classList && typeof btn.classList.contains === 'function' &&
+      (btn.classList.contains('primary') || btn.classList.contains('bid-big'));
+    playClickSound(primary ? 920 : 760);
+  });
+
   /* ---------------- 渲染 ---------------- */
 
   function render() {
     if (!state) return;
     renderTopbar();
+    renderBidEvent();
     renderSeats();
     renderCenter();
     renderHand();
@@ -93,9 +259,18 @@
   var lastMultBadge = '';
   var lastStatusHtml = '';
   var lastMultRowHtml = '';
-  var lastCounterHtml = '';
   var lastLogLine = '';
   var lastHandCount = '';
+  var lastBidEventSig = '';
+
+  function renderBidEvent() {
+    // 叫分事件变化时语音播报（叫分/不叫/抢地主/重新发牌）
+    var be = state.bid_event;
+    var sig = be ? (be.kind + '|' + (be.bid || 0) + '|' + be.player) : '';
+    if (sig === lastBidEventSig) return;
+    lastBidEventSig = sig;
+    if (be && voiceReady) speak(bidSpeech(be));
+  }
 
   function renderTopbar() {
     var ri = '第 ' + state.round_no + ' 局';
@@ -143,6 +318,9 @@
         var left = $('left' + p);
         left.textContent = leftText;
         left.className = leftCls;
+        // 头像：地主显示地主形象，其余显示农民形象
+        $('avatar' + p).innerHTML = (state.landlord === p)
+          ? DDZ.landlordAvatar() : DDZ.farmerAvatar();
       }
 
       // 最近出牌（中央对战区槽位）
@@ -160,6 +338,8 @@
             return '<span class="mini anim">' + DDZ.cardSVG(c) + '</span>';
           }).join('');
         }
+        // 语音播报：任何一方出牌/不出都播报（跳过首次渲染）
+        if (voiceReady) announcePlay(lp);
       }
     }
     var hc = state.hand_counts[0] + ' 张';
@@ -209,21 +389,6 @@
     if (state.rockets_used > 0) chips.push('<span class="chip">王炸 x' + state.rockets_used + '</span>');
     var multHtml = chips.join('');
     if (multHtml !== lastMultRowHtml) { lastMultRowHtml = multHtml; $('multRow').innerHTML = multHtml; }
-
-    // 记牌器
-    var counterHtml = '';
-    if (state.settings.show_counter) {
-      var ranks = [];
-      for (var r = 3; r <= 17; r++) {
-        var n = state.remaining[r];
-        var label = DDZ.RANK_TEXT[r];
-        if (label.length > 2) label = label.replace('王', '');
-        ranks.push('<span class="' + (n === 0 ? 'counter-chip empty' : 'counter-chip') + '">' +
-          '<span class="r">' + label + '</span><span class="n">' + (n === 0 ? '0' : String(n)) + '</span></span>');
-      }
-      counterHtml = ranks.join('');
-    }
-    if (counterHtml !== lastCounterHtml) { lastCounterHtml = counterHtml; $('counterRow').innerHTML = counterHtml; }
 
     // 日志
     var lg = state.log.length ? state.log[state.log.length - 1] : '';
@@ -386,6 +551,8 @@
     var idx = cardIndexById(id);
     if (idx < 0) return;
     dragState = { anchor: idx, current: idx, moved: false, wasSelected: selection.has(id), id: id };
+    // 按住牌时切换为"抓手"光标
+    try { if (document.body) document.body.style.cursor = 'grabbing'; } catch (e) {}
     if (e.cancelable) e.preventDefault();
   });
 
@@ -402,15 +569,17 @@
     applyRangeSelection(dragState.anchor, idx);
   });
 
-  var suppressClickUntil = 0;   // 框选拖动结束后的 click 抑制窗口
+  var lastDragEndAt = -1e9;   // 最近一次框选结束时间：只抑制"同一手势紧随派发的 click"
 
   function endDrag() {
     if (!dragState) return;
     var st = dragState;
     dragState = null;
+    try { if (document.body) document.body.style.cursor = ''; } catch (e) {}
     if (st.moved) {
-      // 拖动结束：浏览器随后可能派发 click（松手位置在空白时），需抑制避免误出牌
-      suppressClickUntil = Date.now() + 400;
+      // 框选松手后，浏览器会在极短时间内（<10ms，同一手势）同步派发一个 click；
+      // 记录时间戳，仅抑制这个紧随的 click，避免拖到牌缝误出牌。
+      lastDragEndAt = Date.now();
     } else {
       // 单击：切换该牌的选中状态
       toggleSelect(st.id);
@@ -427,7 +596,9 @@
   }
 
   $('app').addEventListener('click', function (e) {
-    if (Date.now() < suppressClickUntil) return;   // 框选松手后的误触抑制
+    // 仅抑制框选松手同一手势紧随派发的 click（60ms 内）；
+    // 用户随后主动点击空白（移动+按下 > 60ms）立即出牌，无需点两次。
+    if (Date.now() - lastDragEndAt < 60) return;
     if (!isBlankArea(e.target)) return;
     if (!canActHuman() || selection.size === 0) return;
     lastBlankClickPlay = Date.now();
@@ -532,8 +703,8 @@
   $('btnSettings').addEventListener('click', function () {
     $('setSpeed').value = state.settings.bot_delay_ms;
     $('speedVal').textContent = (state.settings.bot_delay_ms / 1000).toFixed(1) + ' 秒';
-    $('setCounter').checked = state.settings.show_counter;
     $('setAuto').checked = state.settings.auto_pilot;
+    $('setVoice').checked = voiceEnabled;
     $('settingsModal').classList.remove('hidden');
   });
   $('btnCloseSettings').addEventListener('click', function () {
@@ -549,11 +720,16 @@
       postAction({ action: 'set_delay', ms: ms });
     }, 300);
   });
-  $('setCounter').addEventListener('change', function () {
-    postAction({ action: 'set_counter', show: this.checked });
-  });
   $('setAuto').addEventListener('change', function () {
     postAction({ action: 'set_auto', on: this.checked });
+  });
+  $('setVoice').addEventListener('change', function () {
+    voiceEnabled = this.checked;
+    try {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem('ddz_voice', this.checked ? '1' : '0');
+      }
+    } catch (e) {}
   });
 
   /* ---------------- 启动 ---------------- */

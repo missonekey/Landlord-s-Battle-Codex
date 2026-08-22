@@ -88,7 +88,39 @@ var document = {
 };
 
 // ---------- 全局环境 ----------
-var window = { confirm: function () { return true; } };
+var window = {
+  confirm: function () { return true; },
+  speechSynthesis: {
+    _last: null,
+    _voice: null,
+    cancel: function () {},
+    speak: function (u) { this._last = u.text; this._voice = u.voice ? u.voice.name : null; },
+    getVoices: function () {
+      return [
+        { name: 'Ting-Ting', lang: 'zh-CN', localService: true },
+        { name: 'Meijia', lang: 'zh-CN', localService: true },
+        { name: 'Daniel', lang: 'en-GB', localService: true }
+      ];
+    }
+  },
+  SpeechSynthesisUtterance: function (t) {
+    this.text = t; this.lang = ''; this.rate = 1; this.pitch = 1;
+  },
+  __oscCount: 0,
+  AudioContext: function () {
+    return {
+      state: 'running', currentTime: 0, destination: {},
+      resume: function () {},
+      createOscillator: function () {
+        window.__oscCount++;
+        return { type: '', frequency: { value: 0 }, connect: function () {}, start: function () {}, stop: function () {} };
+      },
+      createGain: function () {
+        return { gain: { setValueAtTime: function () {}, exponentialRampToValueAtTime: function () {} }, connect: function () {} };
+      }
+    };
+  }
+};
 var DDZ = null; // 浏览器中 window.DDZ 即全局 DDZ，这里手动桥接
 var _pollFn = null;
 setTimeout = function () { return 0; };
@@ -185,12 +217,12 @@ try {
   check(faceOk, "J/Q/K/A/2 牌面中央统一为大花色" + (badFaces.length ? "（异常牌: " + badFaces.join(",") + "）" : ""));
 
   // ---- 渲染早退优化：轮询相同状态不得重建 DOM（卡顿修复的回归防护） ----
-  var m1 = els.multRow._setCount, c1 = els.counterRow._setCount, s1 = els.status._setCount;
+  var m1 = els.multRow._setCount, s1 = els.status._setCount, l1 = els.logLine._setCount;
   _pollFn();
   _pollFn();
-  check(els.multRow._setCount === m1 && els.counterRow._setCount === c1 &&
-        els.status._setCount === s1,
-        "相同状态轮询不重建 DOM（倍数/记牌器/状态）");
+  check(els.multRow._setCount === m1 && els.status._setCount === s1 &&
+        els.logLine._setCount === l1,
+        "相同状态轮询不重建 DOM（倍数/状态/日志）");
 
   els.btnHint.fire("click");
   detail.push("  ✓ 点击提示无异常");
@@ -253,6 +285,19 @@ try {
         [0, 1, 2, 3, 4, 5].every(function (i) { return six.indexOf(Number(cardIds[i])) >= 0; }),
         "两次乱序框选累加出牌 6 张 [" + six.join(",") + "]");
 
+  // ---- 框选后点空白出牌（回归防护：曾因 400ms 抑制窗口需点两次） ----
+  dragFromTo(0, 3);   // 框选，设置 lastDragEndAt
+  _fakeNow += 10;     // 10ms 后：同一手势紧随派发的 click
+  lastPostBody = null;
+  els.app.fire("click", { target: { closest: function () { return null; } } });
+  check(!lastPostBody, "框选松手同一手势的 click 被抑制");
+  _fakeNow += 100;    // 再过 100ms：用户主动点击空白
+  els.app.fire("click", { target: { closest: function () { return null; } } });
+  var dg = JSON.parse(lastPostBody || "{}");
+  check(dg.action === "play" && (dg.cards || []).length === 4 &&
+        [0, 1, 2, 3].every(function (i) { return (dg.cards || []).indexOf(Number(cardIds[i])) >= 0; }),
+        "框选后稍候点空白立即出牌（无需点两次）[" + (dg.cards || []).join(",") + "]");
+
   // ---- 空白单击 = 出牌（任意空白区域，无需点按钮） ----
   _fakeNow += 1000;   // 越过框选后的 click 抑制窗口
   lastPostBody = null;
@@ -291,6 +336,55 @@ try {
   check(afterPlay.action === "play" && db3.action !== "pass",
         "空白单击出牌后双击被抑制（不会误不出）");
 
+  // ---- 语音播报：任何一方出牌/不出都触发 Web Speech 播报 ----
+  var vs = JSON.parse(JSON.stringify(currentState));
+  vs.last_plays[2] = { player: 2, passed: false, cards: [0, 13], type: 'pair', main_rank: 3, label: '对子 3' };
+  currentState = vs;
+  _pollFn();
+  check(window.speechSynthesis._last === '对三', "出对子播报「对三」，实际: " + window.speechSynthesis._last);
+  check(window.speechSynthesis._voice === 'Meijia', "自动选用自然中文语音（Meijia），实际: " + window.speechSynthesis._voice);
+  var vs2 = JSON.parse(JSON.stringify(currentState));
+  vs2.last_plays[0] = { player: 0, passed: true, cards: [], type: null, main_rank: null, label: '不出' };
+  currentState = vs2;
+  _pollFn();
+  check(window.speechSynthesis._last === '要不起', "不出播报「要不起」，实际: " + window.speechSynthesis._last);
+  // 炸弹/王炸播报
+  var vs3 = JSON.parse(JSON.stringify(currentState));
+  vs3.last_plays[1] = { player: 1, passed: false, cards: [3, 16, 29, 42], type: 'bomb', main_rank: 6, label: '炸弹 6' };
+  currentState = vs3;
+  _pollFn();
+  check(window.speechSynthesis._last === '炸弹', "炸弹播报「炸弹」，实际: " + window.speechSynthesis._last);
+
+  // ---- 叫分语音播报 ----
+  var vb = JSON.parse(JSON.stringify(currentState));
+  vb.bid_event = { kind: 'bid', bid: 3, player: 0 };
+  currentState = vb;
+  _pollFn();
+  check(window.speechSynthesis._last === '三分', "叫 3 分播报「三分」，实际: " + window.speechSynthesis._last);
+  var vb2 = JSON.parse(JSON.stringify(currentState));
+  vb2.bid_event = { kind: 'landlord', bid: 3, player: 2 };
+  currentState = vb2;
+  _pollFn();
+  check(window.speechSynthesis._last === '抢地主', "地主确定播报「抢地主」，实际: " + window.speechSynthesis._last);
+  var vb3 = JSON.parse(JSON.stringify(currentState));
+  vb3.bid_event = { kind: 'pass', player: 1 };
+  currentState = vb3;
+  _pollFn();
+  check(window.speechSynthesis._last === '不叫', "不叫播报「不叫」，实际: " + window.speechSynthesis._last);
+
+  // ---- 按钮点击音效（Web Audio 合成） ----
+  window.__oscCount = 0;
+  document.fire("click", { target: { closest: function (sel) {
+    return sel === 'button' ? { disabled: false, classList: { contains: function (c) { return c === 'primary'; } } } : null;
+  } } });
+  check(window.__oscCount > 0, "按钮点击触发音效（oscillator 创建 " + window.__oscCount + " 次）");
+  // 禁用按钮不触发音效
+  window.__oscCount = 0;
+  document.fire("click", { target: { closest: function (sel) {
+    return sel === 'button' ? { disabled: true, classList: { contains: function () { return false; } } } : null;
+  } } });
+  check(window.__oscCount === 0, "禁用按钮不触发音效");
+
   els.btnSettings.fire("click");
   check(!els.settingsModal.classList.contains("hidden"), "设置弹窗打开");
   els.btnCloseSettings.fire("click");
@@ -306,6 +400,14 @@ try {
   // 地主身份标签应显示
   var l = currentState.landlord;
   check(els["role" + l].textContent === "地主", "地主身份标签 (player " + l + ")");
+  // 头像形象：地主显示地主形象（红瓜皮帽），农民显示农民形象（草帽）
+  check(els["avatar" + l].innerHTML.indexOf("c0392b") >= 0 &&
+        els["avatar" + l].innerHTML.indexOf("ffd76a") >= 0,
+        "地主头像显示地主形象（瓜皮帽）");
+  var f1 = (l + 1) % 3, f2 = (l + 2) % 3;
+  check(els["avatar" + f1].innerHTML.indexOf("e6b84a") >= 0 &&
+        els["avatar" + f2].innerHTML.indexOf("e6b84a") >= 0,
+        "农民头像显示农民形象（草帽）");
   els.btnAgain.fire("click");
   detail.push("  ✓ 再来一局无异常");
   els.btnCloseResult.fire("click");

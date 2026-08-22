@@ -1,6 +1,6 @@
 {
   "name": "doudizhu",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "斗地主（Dou Dizhu）卡牌游戏插件：完整标准规则的本地网页版斗地主，您是主玩家，另两位由内置策略 AI 扮演。",
   "author": {
     "name": "Landlord's Battle Codex"

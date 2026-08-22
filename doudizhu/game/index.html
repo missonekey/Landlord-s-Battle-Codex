@@ -32,7 +32,7 @@
     <div class="row-top">
       <section class="seat seat-left" id="seat2">
         <div class="avatar-wrap">
-          <div class="avatar bot">🤖</div>
+          <div class="avatar" id="avatar2"></div>
         </div>
         <div class="seat-info">
           <div class="name">电脑·上家</div>
@@ -46,7 +46,6 @@
         <div class="bottom-cards" id="bottomCards"></div>
         <div class="status" id="status">正在发牌…</div>
         <div class="mult-row" id="multRow"></div>
-        <div class="counter-row" id="counterRow"></div>
         <div class="log-line" id="logLine"></div>
       </section>
 
@@ -58,7 +57,7 @@
           <div class="seat-score" id="score1">0</div>
         </div>
         <div class="avatar-wrap">
-          <div class="avatar bot">🤖</div>
+          <div class="avatar" id="avatar1"></div>
         </div>
       </section>
     </div>
@@ -85,7 +84,7 @@
     <section class="seat seat-player" id="seat0">
       <div class="player-head">
         <div class="avatar-wrap">
-          <div class="avatar">😎</div>
+          <div class="avatar" id="avatar0"></div>
         </div>
         <div class="seat-info">
           <div class="name">你</div>
@@ -136,12 +135,12 @@
         <span class="speed-val" id="speedVal">0.9 秒</span>
       </label>
       <label class="setting-row">
-        <span>显示记牌器</span>
-        <input type="checkbox" id="setCounter" checked>
-      </label>
-      <label class="setting-row">
         <span>托管模式（自动代打出牌）</span>
         <input type="checkbox" id="setAuto">
+      </label>
+      <label class="setting-row">
+        <span>游戏声音（语音 + 按钮音效）</span>
+        <input type="checkbox" id="setVoice" checked>
       </label>
       <p class="settings-note">托管开启后，您的回合将由 AI 自动出牌，适合观看对局。</p>
     </div>

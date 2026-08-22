@@ -43,6 +43,23 @@ class TestDeal(unittest.TestCase):
 
 
 class TestBidding(unittest.TestCase):
+    def test_bid_event(self):
+        g = Game(seed=1)
+        starter = g.starter
+        g.bid(g.turn, 1)                       # 第一家叫 1 分
+        self.assertEqual(g.bid_event, {"kind": "bid", "bid": 1, "player": starter})
+        p = g.turn
+        g.bid(p, 0)                            # 第二家不叫
+        self.assertEqual(g.bid_event, {"kind": "pass", "player": p})
+        p2 = g.turn
+        g.bid(p2, 3)                           # 第三家叫 3 分
+        self.assertEqual(g.bid_event, {"kind": "bid", "bid": 3, "player": p2})
+        g.bid(g.turn, 0)
+        g.bid(g.turn, 0)                       # 两家不叫 → 地主确定
+        self.assertEqual(g.bid_event["kind"], "landlord")
+        self.assertEqual(g.bid_event["player"], p2)
+        self.assertEqual(g.bid_event["bid"], 3)
+
     def test_all_pass_redeals(self):
         g = Game(seed=2)
         deal0 = g.deal_no

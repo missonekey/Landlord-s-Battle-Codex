@@ -29,12 +29,11 @@ DEFAULT_PORT = 8765
 class GameServer:
     """持有对局实例并负责机器人调度。"""
 
-    def __init__(self, bot_delay_ms: int = 900, show_counter: bool = True,
+    def __init__(self, bot_delay_ms: int = 900,
                  auto_pilot: bool = False, seed: Optional[int] = None):
         self.lock = threading.RLock()
         self.game = Game(seed=seed)
         self.bot_delay_ms = max(0, min(5000, int(bot_delay_ms)))
-        self.show_counter = bool(show_counter)
         self.auto_pilot = bool(auto_pilot)
         self._tick_lock = threading.Lock()
         self._scheduled: Optional[int] = None  # (actor, version)
@@ -48,7 +47,6 @@ class GameServer:
             d = self.game.snapshot()
             d["settings"] = {
                 "bot_delay_ms": self.bot_delay_ms,
-                "show_counter": self.show_counter,
                 "auto_pilot": self.auto_pilot,
             }
             return d
@@ -79,8 +77,6 @@ class GameServer:
                     g._new_round()
                 elif action == "set_delay":
                     self.bot_delay_ms = max(0, min(5000, int(payload.get("ms", 900))))
-                elif action == "set_counter":
-                    self.show_counter = bool(payload.get("show", True))
                 elif action == "set_auto":
                     self.auto_pilot = bool(payload.get("on", False))
                 else:

@@ -68,6 +68,8 @@ def _free_port() -> int:
         # 确认端口本身可绑定（避免被其它程序占用但未响应 /api/state）
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         try:
+            # 允许复用 TIME_WAIT 端口（服务器本身也设置了 SO_REUSEADDR）
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             s.bind(("127.0.0.1", p))
             return p
         except OSError:
