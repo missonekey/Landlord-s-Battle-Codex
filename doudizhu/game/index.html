@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>斗地主 · Dou Dizhu</title>
+<link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div id="app">
+
+  <!-- 顶栏 -->
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-icon">🃏</span>
+      <span class="brand-name">斗地主</span>
+    </div>
+    <div class="topbar-center">
+      <span class="round-info" id="roundInfo">第 1 局</span>
+      <span class="mult-badge" id="multBadge">倍数 x1</span>
+    </div>
+    <div class="top-actions">
+      <button id="btnSettings" class="btn ghost" type="button">设置</button>
+      <button id="btnNewRound" class="btn ghost" type="button">新一局</button>
+    </div>
+  </header>
+
+  <main class="table">
+
+    <!-- 顶部：两家电脑 + 中央信息 -->
+    <div class="row-top">
+      <section class="seat seat-left" id="seat2">
+        <div class="avatar-wrap">
+          <div class="avatar bot">🤖</div>
+        </div>
+        <div class="seat-info">
+          <div class="name">电脑·上家</div>
+          <div class="role-badge" id="role2"></div>
+          <div class="seat-score" id="score2">0</div>
+        </div>
+        <div class="cards-left" id="left2">17</div>
+      </section>
+
+      <section class="center-head">
+        <div class="bottom-cards" id="bottomCards"></div>
+        <div class="status" id="status">正在发牌…</div>
+        <div class="mult-row" id="multRow"></div>
+        <div class="counter-row" id="counterRow"></div>
+        <div class="log-line" id="logLine"></div>
+      </section>
+
+      <section class="seat seat-right" id="seat1">
+        <div class="cards-left" id="left1">17</div>
+        <div class="seat-info">
+          <div class="name">电脑·下家</div>
+          <div class="role-badge" id="role1"></div>
+          <div class="seat-score" id="score1">0</div>
+        </div>
+        <div class="avatar-wrap">
+          <div class="avatar bot">🤖</div>
+        </div>
+      </section>
+    </div>
+
+    <!-- 中央对战区：三家出牌都集中显示在这里 -->
+    <div class="battlefield">
+      <div class="turn-arrow arrow-ul" id="arrow2">▼</div>
+      <div class="turn-arrow arrow-ur" id="arrow1">▼</div>
+      <div class="turn-arrow arrow-dn" id="arrow0">▲</div>
+      <div class="play-slot slot-upper-left" id="lastPlay2"></div>
+      <div class="play-slot slot-upper-right" id="lastPlay1"></div>
+      <div class="play-slot slot-bottom" id="lastPlay0"></div>
+
+      <!-- 叫分面板（叫地主阶段显示在战场中央） -->
+      <div class="bid-panel hidden" id="bidPanel">
+        <button id="btnBid0" class="btn bid-btn bid-big" type="button">不叫</button>
+        <button id="btnBid1" class="btn bid-btn bid-big" type="button">1分</button>
+        <button id="btnBid2" class="btn bid-btn bid-big" type="button">2分</button>
+        <button id="btnBid3" class="btn bid-btn bid-big" type="button">3分</button>
+      </div>
+    </div>
+
+    <!-- 玩家区 -->
+    <section class="seat seat-player" id="seat0">
+      <div class="player-head">
+        <div class="avatar-wrap">
+          <div class="avatar">😎</div>
+        </div>
+        <div class="seat-info">
+          <div class="name">你</div>
+          <div class="role-badge" id="role0"></div>
+          <div class="seat-score" id="score0">0</div>
+        </div>
+        <div class="cards-left" id="left0"></div>
+        <div class="hand-count" id="handCount"></div>
+      </div>
+
+      <div class="hand" id="hand"></div>
+
+      <!-- 操作栏 -->
+      <footer class="controls" id="controls">
+        <div class="ctrl-buttons" id="ctrlButtons">
+          <button id="btnPass" class="btn" type="button">不出</button>
+          <button id="btnPlay" class="btn primary" type="button">出牌</button>
+          <button id="btnHint" class="btn ghost" type="button">提示</button>
+        </div>
+        <div class="ctrl-hint" id="ctrlHint"></div>
+      </footer>
+    </section>
+
+  </main>
+
+</div>
+
+<!-- 结算弹窗 -->
+<div class="modal-mask hidden" id="resultModal">
+  <div class="modal">
+    <div class="modal-title" id="resultTitle"></div>
+    <div class="modal-body" id="resultBody"></div>
+    <div class="modal-actions">
+      <button id="btnAgain" class="btn primary" type="button">再来一局</button>
+      <button id="btnCloseResult" class="btn ghost" type="button">关闭</button>
+    </div>
+  </div>
+</div>
+
+<!-- 设置弹窗 -->
+<div class="modal-mask hidden" id="settingsModal">
+  <div class="modal">
+    <div class="modal-title">设置</div>
+    <div class="modal-body settings-body">
+      <label class="setting-row">
+        <span>电脑出牌速度</span>
+        <input type="range" id="setSpeed" min="200" max="2500" step="100" value="900">
+        <span class="speed-val" id="speedVal">0.9 秒</span>
+      </label>
+      <label class="setting-row">
+        <span>显示记牌器</span>
+        <input type="checkbox" id="setCounter" checked>
+      </label>
+      <label class="setting-row">
+        <span>托管模式（自动代打出牌）</span>
+        <input type="checkbox" id="setAuto">
+      </label>
+      <p class="settings-note">托管开启后，您的回合将由 AI 自动出牌，适合观看对局。</p>
+    </div>
+    <div class="modal-actions">
+      <button id="btnCloseSettings" class="btn primary" type="button">完成</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast hidden" id="toast"></div>
+
+<script src="js/render.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>

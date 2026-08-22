@@ -1,0 +1,20 @@
+{
+  "name": "doudizhu-marketplace",
+  "interface": {
+    "displayName": "斗地主 Dou Dizhu"
+  },
+  "plugins": [
+    {
+      "name": "doudizhu",
+      "source": {
+        "source": "local",
+        "path": "./doudizhu"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Games"
+    }
+  ]
+}
