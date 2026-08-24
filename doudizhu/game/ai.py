@@ -196,7 +196,26 @@ def suggest_lead(hand, ctx: Optional[dict] = None) -> List[int]:
         if p:
             return p
 
-    # 3) 孤张单牌（优先非 2、非王的小牌；再优先"安全牌"——外面没有更大的牌）
+    # 3) 优先完整结构，避免先拆孤张/对子/三张后永远走不到顺子、连对、飞机。
+    planes = _pure_airplanes(counts)
+    if planes:
+        start, k = max(planes, key=lambda t: (t[1], -t[0]))
+        return _pick_lead_airplane(start, k, hand, counts, ids)
+
+    chains = _pure_chains(counts)
+    if chains:
+        start, k = max(chains, key=lambda t: (t[1], -t[0]))
+        out = []
+        for r in range(start, start + k):
+            out.extend(ids[r][:2])
+        return out
+
+    straights = _pure_straights(counts)
+    if straights:
+        start, length = max(straights, key=lambda t: (t[1], -t[0]))
+        return [ids[r][0] for r in range(start, start + length)]
+
+    # 4) 孤张单牌（优先非 2、非王的小牌；再优先"安全牌"——外面没有更大的牌）
     singles = [r for r in sorted(counts) if counts[r] == 1]
     if singles:
         prefer = [r for r in singles if r <= 14]
@@ -206,12 +225,12 @@ def suggest_lead(hand, ctx: Optional[dict] = None) -> List[int]:
         r = (safe or pool)[0]
         return [ids[r][0]]
 
-    # 4) 对子
+    # 5) 对子
     pairs = [r for r in sorted(counts) if 2 <= counts[r] < 4]
     if pairs:
         return ids[pairs[0]][:2]
 
-    # 5) 三张（有孤张就三带一）
+    # 6) 三张（有孤张就三带一）
     triples = [r for r in sorted(counts) if 3 <= counts[r] < 4]
     if triples:
         r = triples[0]
@@ -220,33 +239,12 @@ def suggest_lead(hand, ctx: Optional[dict] = None) -> List[int]:
             return ids[r][:3] + [ids[wing[0]][0]]
         return ids[r][:3]
 
-    # 6) 顺子（孤张组成，选最长、起点最小）
-    straights = _pure_straights(counts)
-    if straights:
-        start, length = max(straights, key=lambda t: (t[1], -t[0]))
-        return [ids[r][0] for r in range(start, start + length)]
-
-    # 7) 连对
-    chains = _pure_chains(counts)
-    if chains:
-        start, k = max(chains, key=lambda t: (t[1], -t[0]))
-        out = []
-        for r in range(start, start + k):
-            out.extend(ids[r][:2])
-        return out
-
-    # 8) 飞机
-    planes = _pure_airplanes(counts)
-    if planes:
-        start, k = max(planes, key=lambda t: (t[1], -t[0]))
-        return _pick_lead_airplane(start, k, hand, counts, ids)
-
-    # 9) 只剩炸弹/王炸
+    # 7) 只剩炸弹/王炸
     if all(n == 4 for n in counts.values()) or set(hand) == {JOKER_SMALL_ID, JOKER_BIG_ID}:
         r = min(counts)
         return ids[r][:4]
 
-    # 10) 兜底：拆最小的牌
+    # 8) 兜底：拆最小的牌
     r = min(counts)
     if counts[r] >= 2:
         return ids[r][:2]
@@ -450,8 +448,9 @@ def _gen_beats(hand, target: rules.Combo, ctx: dict):
 def suggest_follow(hand, target: rules.Combo, ctx: Optional[dict] = None) -> Optional[List[int]]:
     """跟牌：返回要出的牌，或 None 表示过牌。"""
     ctx = ctx or {}
-    if ctx.get("role") == "farmer" and ctx.get("target_owner") == ctx.get("teammate"):
-        return None  # 不压队友
+    if ctx.get("role") == "farmer" and ctx.get("target_owner") == ctx.get("teammate") \
+            and ctx.get("landlord_left", 99) > 1:
+        return None  # 通常不压队友；地主只剩一张时必须尝试防守。
     # 大师级：整手牌能一把压过就走（残局直接获胜）
     whole = rules.classify(hand)
     if whole is not None and rules.beats(whole, target):

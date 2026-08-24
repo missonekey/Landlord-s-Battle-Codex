@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import subprocess
 import sys
 
 REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -72,14 +73,37 @@ def upsert_marketplace() -> None:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
 
+def install_with_codex() -> bool:
+    """让当前 Codex CLI 真正登记为已安装，而不只是在市场中可见。"""
+    codex = shutil.which("codex")
+    if not codex:
+        print("提示：未找到 codex CLI。插件文件与个人市场已准备好，")
+        print("请在 Codex 的 Plugins Directory 中选择 Personal 后点击安装。")
+        return False
+    result = subprocess.run(
+        [codex, "plugin", "add", "%s@personal" % PLUGIN_NAME, "--json"],
+        capture_output=True, text=True,
+    )
+    if result.returncode == 0:
+        return True
+    combined = (result.stdout + "\n" + result.stderr).lower()
+    if "already installed" in combined or "已安装" in combined:
+        return True
+    print("提示：Codex CLI 安装登记未完成：%s" %
+          (result.stderr.strip() or result.stdout.strip() or "未知错误"))
+    print("请在 Codex 的 Plugins Directory 中选择 Personal 后点击安装。")
+    return False
+
+
 def main() -> None:
     if not os.path.isdir(PLUGIN_SRC):
         print("错误：找不到插件源码目录 %s" % PLUGIN_SRC)
         sys.exit(1)
     dst = copy_plugin()
     upsert_marketplace()
+    registered = install_with_codex()
     print("=" * 52)
-    print(" 斗地主插件安装完成！")
+    print(" 斗地主插件文件已安装%s！" % ("并已登记到 Codex" if registered else ""))
     print(" 插件位置: %s" % dst)
     print(" 市场条目: %s" % marketplace_path())
     print("=" * 52)
@@ -87,7 +111,7 @@ def main() -> None:
     print("使用方式：")
     print("  1. 打开 Codex，输入：玩斗地主 / 启动斗地主游戏")
     print("     （或直接说“我想打斗地主”）")
-    print("  2. Codex 会运行 python3 scripts/start_game.py 并打开浏览器")
+    print("  2. Codex 会运行 python3 scripts/start_game.py 并在内置浏览器打开")
     print("     （命令立即返回；服务器在后台运行）")
     print("")
     print("停止服务器：")
@@ -97,7 +121,7 @@ def main() -> None:
     print("  本仓库根目录自带 .agents/plugins/marketplace.json（仓库级市场），")
     print("  推送到 GitHub 后，他人执行：")
     print("    codex plugin marketplace add <仓库地址>")
-    print("    codex plugin install doudizhu")
+    print("    codex plugin add doudizhu@doudizhu-marketplace")
     print("")
     print("验证安装：")
     print("  codex plugin list        # 应能看到 doudizhu")

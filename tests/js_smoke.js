@@ -145,12 +145,17 @@ function thenable(v) {
 
 var currentState = readJson("tests/snapshots/bidding.json");
 var lastPostBody = null;
+var nextPostResponse = null;
 fetch = function (url, opts) {
   var isState = String(url).indexOf("/api/state") >= 0;
   if (!isState && opts) lastPostBody = String(opts.body || "");
   return thenable({
+    headers: { get: function () { return "test-token"; } },
     json: function () {
-      return isState ? currentState : { ok: true, state: currentState };
+      if (isState) return currentState;
+      var out = nextPostResponse || { ok: true, state: currentState };
+      nextPostResponse = null;
+      return out;
     }
   });
 };
@@ -184,9 +189,14 @@ try {
   wf.bid_highest = 0;
   wf.bidder = null;
   wf.phase = 'bidding';
+  wf.settings.started = false;
   currentState = wf;
   _pollFn();
   check(!els.welcomeModal.classList.contains("hidden"), "全新未开始时显示开始弹窗");
+  var started = JSON.parse(JSON.stringify(wf));
+  started.settings.started = true;
+  started.version += 1;
+  nextPostResponse = { ok: true, state: started };
   els.btnStartGame.fire("click");
   check(els.welcomeModal.classList.contains("hidden"), "点击开始游戏后弹窗关闭");
   currentState = readJson("tests/snapshots/bidding.json");
@@ -298,56 +308,25 @@ try {
         [0, 1, 2, 3, 4, 5].every(function (i) { return six.indexOf(Number(cardIds[i])) >= 0; }),
         "两次乱序框选累加出牌 6 张 [" + six.join(",") + "]");
 
-  // ---- 框选后点空白出牌（回归防护：曾因 400ms 抑制窗口需点两次） ----
-  dragFromTo(0, 3);   // 框选，设置 lastDragEndAt
-  _fakeNow += 10;     // 10ms 后：同一手势紧随派发的 click
-  lastPostBody = null;
-  els.app.fire("click", { target: { closest: function () { return null; } } });
-  check(!lastPostBody, "框选松手同一手势的 click 被抑制");
-  _fakeNow += 100;    // 再过 100ms：用户主动点击空白
-  els.app.fire("click", { target: { closest: function () { return null; } } });
-  var dg = JSON.parse(lastPostBody || "{}");
-  check(dg.action === "play" && (dg.cards || []).length === 4 &&
-        [0, 1, 2, 3].every(function (i) { return (dg.cards || []).indexOf(Number(cardIds[i])) >= 0; }),
-        "框选后稍候点空白立即出牌（无需点两次）[" + (dg.cards || []).join(",") + "]");
-
-  // ---- 空白单击 = 出牌（任意空白区域，无需点按钮） ----
-  _fakeNow += 1000;   // 越过框选后的 click 抑制窗口
-  lastPostBody = null;
-  clickCardAt(0);
-  clickCardAt(1);   // 选两张
-  els.app.fire("click", { target: { closest: function () { return null; } } });
-  var bc = JSON.parse(lastPostBody || "{}");
-  check(bc.action === "play" && (bc.cards || []).length === 2 &&
-        [Number(cardIds[0]), Number(cardIds[1])].every(
-          function (id) { return (bc.cards || []).indexOf(id) >= 0; }),
-        "空白单击直接出牌 [" + (bc.cards || []).join(",") + "]");
-  check(els.btnPlay.disabled, "空白出牌后选中清空（出牌按钮禁用）");
-  lastPostBody = null;
-  els.app.fire("click", { target: { closest: function () { return null; } } });
-  check(!lastPostBody, "无选中时空白单击不发请求");
-
-  // ---- 双击空白区域 = 不出（无选中时） ----
-  _fakeNow += 1000;   // 让上一次"空白单击出牌"时间戳过期，双击才生效
-  lastPostBody = null;
-  els.app.fire("dblclick", { target: { closest: function () { return null; } } });
-  var dbSent = JSON.parse(lastPostBody || "{}");
-  check(dbSent.action === "pass", "双击空白触发不出");
-  // 双击在牌上不触发
-  lastPostBody = null;
-  els.app.fire("dblclick", { target: fakeCard(cardIds[0]) });
-  var db2 = JSON.parse(lastPostBody || "{}");
-  check(!db2 || db2.action !== "pass", "双击在牌上不触发不出");
-  // 刚用空白单击出过牌后，双击被抑制（不会误触发"不出"）
-  lastPostBody = null;
+  // ---- 非法出牌保留选择，空白区域不再误触出牌/不出 ----
   clickCardAt(0);
   clickCardAt(1);
-  els.app.fire("click", { target: { closest: function () { return null; } } });  // 空白出牌
-  var afterPlay = JSON.parse(lastPostBody || "{}");
+  nextPostResponse = { ok: false, error: '所选牌型不合法', state: currentState };
+  lastPostBody = null;
+  els.btnPlay.fire("click");
+  var rejected = JSON.parse(lastPostBody || "{}");
+  check(rejected.action === "play" && rejected.cards.length === 2,
+        "非法出牌请求正确送达");
+  check(!els.btnPlay.disabled, "非法出牌后保留选择（出牌按钮仍可用）");
+
+  lastPostBody = null;
+  els.app.fire("click", { target: { closest: function () { return null; } } });
+  check(!lastPostBody, "空白单击不触发出牌");
   els.app.fire("dblclick", { target: { closest: function () { return null; } } });
-  var db3 = JSON.parse(lastPostBody || "{}");
-  check(afterPlay.action === "play" && db3.action !== "pass",
-        "空白单击出牌后双击被抑制（不会误不出）");
+  check(!lastPostBody, "空白双击不触发不出");
+  // 清理保留的两张选择，后续测试从空选择继续。
+  clickCardAt(0);
+  clickCardAt(1);
 
   // ---- 语音播报：任何一方出牌/不出都触发 Web Speech 播报 ----
   var vs = JSON.parse(JSON.stringify(currentState));
@@ -406,6 +385,17 @@ try {
   detail.push("  ✓ 切换托管无异常");
 
   // ---- 阶段 3：结算 ----
+  // 恢复一个已结算但尚未重新确认“开始”的存档：只能显示结算，且应关闭设置，
+  // 不能叠加欢迎、设置、结算三层弹窗。
+  els.btnSettings.fire("click");
+  var restoredOver = readJson("tests/snapshots/over.json");
+  restoredOver.settings.started = false;
+  currentState = restoredOver;
+  _pollFn();
+  check(els.welcomeModal.classList.contains("hidden"), "恢复已结算存档不叠加开始弹窗");
+  check(els.settingsModal.classList.contains("hidden"), "结算时自动关闭设置弹窗");
+  check(!els.resultModal.classList.contains("hidden"), "恢复已结算存档显示结算弹窗");
+
   currentState = readJson("tests/snapshots/over.json");
   _pollFn();
   check(!els.resultModal.classList.contains("hidden"), "结算弹窗显示");

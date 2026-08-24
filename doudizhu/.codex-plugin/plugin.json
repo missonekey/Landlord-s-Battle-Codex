@@ -1,10 +1,13 @@
 {
   "name": "doudizhu",
-  "version": "1.1.0",
-  "description": "斗地主（Dou Dizhu）卡牌游戏插件：完整标准规则的本地网页版斗地主，您是主玩家，另两位由内置策略 AI 扮演。",
+  "version": "1.2.0",
+  "description": "斗地主（Dou Dizhu）本地卡牌游戏：在 Codex 内置浏览器中对战两名策略 AI。",
   "author": {
-    "name": "Landlord's Battle Codex"
+    "name": "Landlord's Battle Codex",
+    "url": "https://github.com/missonekey/Landlord-s-Battle-Codex"
   },
+  "homepage": "https://github.com/missonekey/Landlord-s-Battle-Codex",
+  "repository": "https://github.com/missonekey/Landlord-s-Battle-Codex",
   "license": "MIT",
   "keywords": [
     "doudizhu",
@@ -19,11 +22,19 @@
   "interface": {
     "displayName": "斗地主 Dou Dizhu",
     "shortDescription": "完整规则斗地主：本地网页对战两名策略 AI",
-    "longDescription": "一个严格复刻标准「斗地主」规则的本地网页卡牌游戏。支持叫分制叫地主（不叫/1分/2分/3分）、全部牌型（单张、对子、三带一/二、顺子、连对、飞机带翼、四带二、炸弹、王炸）、炸弹与王炸翻倍、春天/反春翻倍。插件在本地启动游戏服务器并在浏览器中打开界面，您作为主玩家，另外两位由内置策略引擎 AI 扮演。卡牌全部由 SVG 手绘，界面简洁清晰，完全离线运行。",
+    "longDescription": "一个遵循标准叫分与出牌规则的本地网页斗地主。支持全部常见牌型、炸弹与王炸翻倍、春天/反春结算。插件在 127.0.0.1 启动无第三方依赖的游戏服务，并由 Codex 内置浏览器打开；牌局数据只保存在用户本机。",
     "developerName": "Landlord's Battle Codex",
     "category": "Games",
     "capabilities": [
       "Interactive"
+    ],
+    "websiteURL": "https://github.com/missonekey/Landlord-s-Battle-Codex",
+    "privacyPolicyURL": "https://github.com/missonekey/Landlord-s-Battle-Codex/blob/main/PRIVACY.md",
+    "termsOfServiceURL": "https://github.com/missonekey/Landlord-s-Battle-Codex/blob/main/TERMS.md",
+    "defaultPrompt": [
+      "玩斗地主",
+      "在 Codex 浏览器中打开斗地主",
+      "继续我的斗地主牌局"
     ],
     "brandColor": "#1B7A3D",
     "composerIcon": "./assets/icon.png",

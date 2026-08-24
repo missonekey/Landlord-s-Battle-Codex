@@ -19,17 +19,9 @@ def make_snapshots(out_dir: str) -> None:
 
     # 1) 叫分阶段（轮到人类）
     g = Game(seed=100)
-    g.bot_move(g.turn)
-    g.bot_move(g.turn)
-    if g.turn == 0 and g.phase == "bidding":
-        s = g.snapshot()
-    else:
-        # 强制：无论轮到谁，直接构造人类回合的叫分快照
-        s = g.snapshot()
-        s["turn"] = 0
-        s["human_turn"] = True
-        s["phase"] = "bidding"
-    s["settings"] = {"bot_delay_ms": 900, "auto_pilot": False}
+    s = g.snapshot()
+    assert g.turn == 0 and g.phase == "bidding"
+    s["settings"] = {"bot_delay_ms": 900, "auto_pilot": False, "started": True}
     with open(os.path.join(out_dir, "bidding.json"), "w", encoding="utf-8") as f:
         json.dump(s, f, ensure_ascii=False)
 
@@ -65,7 +57,7 @@ def make_snapshots(out_dir: str) -> None:
     assert g2 is not None and g2.phase == "playing" and g2.turn == 0, "无法构造跟牌状态"
     s2 = g2.snapshot()
     assert s2["can_pass"] is True, "playing 快照应允许不出"
-    s2["settings"] = {"bot_delay_ms": 900, "auto_pilot": False}
+    s2["settings"] = {"bot_delay_ms": 900, "auto_pilot": False, "started": True}
     with open(os.path.join(out_dir, "playing.json"), "w", encoding="utf-8") as f:
         json.dump(s2, f, ensure_ascii=False)
 
@@ -76,7 +68,7 @@ def make_snapshots(out_dir: str) -> None:
         g3.bot_move(g3.turn)
         guard += 1
     s3 = g3.snapshot()
-    s3["settings"] = {"bot_delay_ms": 900, "auto_pilot": False}
+    s3["settings"] = {"bot_delay_ms": 900, "auto_pilot": False, "started": True}
     with open(os.path.join(out_dir, "over.json"), "w", encoding="utf-8") as f:
         json.dump(s3, f, ensure_ascii=False)
     print("snapshots written to", out_dir)

@@ -14,6 +14,9 @@
   var lastSeatState = [null, null, null];
   var lastBottomSig = '';
   var lastErrorToastAt = 0;
+  var actionToken = '';
+  var actionPending = false;
+  var pollTimer = null;
 
   // 游戏声音总开关：语音播报 + 按钮音效（默认开启，localStorage 持久化）
   var voiceEnabled = true;
@@ -30,23 +33,46 @@
 
   function getState() {
     return fetch('/api/state', { cache: 'no-store' })
-      .then(function (r) { return r.json(); });
+      .then(function (r) {
+        if (r.headers && typeof r.headers.get === 'function') {
+          actionToken = r.headers.get('X-Doudizhu-Token') || actionToken;
+        }
+        return r.json();
+      });
   }
 
   function postAction(payload) {
+    var body = {};
+    Object.keys(payload).forEach(function (key) { body[key] = payload[key]; });
+    if (state && typeof state.version === 'number') body.expected_version = state.version;
     return fetch('/api/action', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    }).then(function (r) { return r.json(); });
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Doudizhu-Token': actionToken
+      },
+      body: JSON.stringify(body)
+    }).then(function (r) { return r.json(); }).catch(function () {
+      toast('操作未送达，请检查游戏服务器后重试', true);
+      return { ok: false, error: 'network' };
+    });
+  }
+
+  function applyState(next) {
+    if (!next) return false;
+    if (state && typeof next.version === 'number' && next.version < state.version) {
+      return false; // 较慢返回的旧轮询不能覆盖刚完成的操作。
+    }
+    state = next;
+    render();
+    return true;
   }
 
   function poll() {
     if (polling) return;
     polling = true;
     getState().then(function (s) {
-      state = s;
-      render();
+      applyState(s);
       voiceReady = true;
     }).catch(function () {
       var now = Date.now();
@@ -67,17 +93,23 @@
     toast._t = setTimeout(function () { el.className = 'toast hidden'; }, 2600);
   }
 
+  function hideToast() {
+    clearTimeout(toast._t);
+    $('toast').className = 'toast hidden';
+  }
+
   // 可执行叫分/出牌/不出等操作（含叫分阶段）
   function canActHuman() {
     if (!state) return false;
     return (state.phase === 'bidding' || state.phase === 'playing') &&
-      state.human_turn && !state.settings.auto_pilot;
+      state.human_turn && !state.settings.auto_pilot && !actionPending;
   }
 
   // 可选牌（仅出牌阶段；叫分阶段不允许点选手牌）
   function canSelectCards() {
     if (!state) return false;
-    return state.phase === 'playing' && state.human_turn && !state.settings.auto_pilot;
+    return state.phase === 'playing' && state.human_turn &&
+      !state.settings.auto_pilot && !actionPending;
   }
 
   function humanWon() {
@@ -286,28 +318,59 @@
       renderHand();
     }
     renderControls();
+    renderOpenSettings();
     renderResult();
   }
 
-  var welcomeDismissed = false;
+  var activeModal = null;
+  var focusBeforeModal = null;
 
-  // 游戏是否"全新未开始"（发牌后尚无人叫分）
-  function isFreshGame() {
-    return state && state.phase === 'bidding' && state.bid_highest === 0 && !state.bidder;
+  function openModal(id, firstFocusId) {
+    var el = $(id);
+    var opened = false;
+    if (el.classList.contains('hidden')) {
+      focusBeforeModal = document.activeElement || null;
+      el.classList.remove('hidden');
+      opened = true;
+    }
+    activeModal = el;
+    var first = firstFocusId ? $(firstFocusId) : null;
+    if (opened && first && typeof first.focus === 'function') first.focus();
+  }
+
+  function closeModal(id) {
+    var el = $(id);
+    el.classList.add('hidden');
+    if (activeModal === el) activeModal = null;
+    if (focusBeforeModal && typeof focusBeforeModal.focus === 'function') {
+      focusBeforeModal.focus();
+    }
+    focusBeforeModal = null;
   }
 
   function renderWelcome() {
-    var el = $('welcomeModal');
-    if (welcomeDismissed || !isFreshGame()) {
-      if (!el.classList.contains('hidden')) el.classList.add('hidden');
+    // 服务重启后会要求重新确认“开始”；但已结算的存档应直接展示结算，
+    // 避免欢迎页和结算页同时叠在一起。
+    if (state.settings.started || state.phase === 'round_over') {
+      if (!$('welcomeModal').classList.contains('hidden')) closeModal('welcomeModal');
     } else {
-      el.classList.remove('hidden');
+      openModal('welcomeModal', 'btnStartGame');
     }
   }
 
   $('btnStartGame').addEventListener('click', function () {
-    welcomeDismissed = true;
-    $('welcomeModal').classList.add('hidden');
+    if (actionPending) return;
+    actionPending = true;
+    postAction({ action: 'start' }).then(function (res) {
+      actionPending = false;
+      if (!res.ok) {
+        if (res.error && res.error !== 'network') toast(res.error, true);
+        if (res.state) applyState(res.state);
+        return;
+      }
+      hideToast();
+      if (res.state) applyState(res.state);
+    });
   });
 
   // 结算时清空手牌（减少残留）
@@ -366,7 +429,7 @@
         leftCls = 'cards-left' + (n === 1 && state.phase === 'playing' ? ' one' : '');
       }
 
-      // 座位状态签名：完全相同则跳过，避免每 400ms 重复写 DOM（样式重算）
+      // 座位状态签名：完全相同则跳过，避免每次轮询重复写 DOM（样式重算）
       var seatSig = [active ? 1 : 0, v, scoreCls, roleText, roleCls, leftText, leftCls].join('|');
       if (seatSig !== lastSeatState[p]) {
         lastSeatState[p] = seatSig;
@@ -452,12 +515,19 @@
         $('bottomCards').innerHTML = '';
       }
     } else {
-      var bSig = (state.bottom_visible ? 'V' : 'H') + state.bottom.map(function (c) { return c.id; }).join(',');
+      var bSig = state.bottom_visible
+        ? 'V' + state.bottom.map(function (c) { return c.id; }).join(',')
+        : 'H' + (state.bottom_count || 3);
       if (bSig !== lastBottomSig) {
         lastBottomSig = bSig;
-        $('bottomCards').innerHTML = state.bottom.map(function (c) {
-          return '<span class="mini anim">' + DDZ.cardSVG(c.id, !state.bottom_visible) + '</span>';
-        }).join('');
+        if (state.bottom_visible) {
+          $('bottomCards').innerHTML = state.bottom.map(function (c) {
+            return '<span class="mini anim">' + DDZ.cardSVG(c.id) + '</span>';
+          }).join('');
+        } else {
+          $('bottomCards').innerHTML = new Array((state.bottom_count || 3) + 1)
+            .join('<span class="mini anim">' + DDZ.backSVG() + '</span>');
+        }
       }
     }
 
@@ -492,8 +562,10 @@
       // 避免选中/悬停的 transform 创建 stacking context 后盖住旁边的牌
       $('hand').innerHTML = cards.map(function (c, i) {
         var sel = selection.has(c.id) ? ' selected' : '';
-        return '<div class="card' + sel + '" data-id="' + c.id +
-          '" data-idx="' + i + '" style="z-index:' + (i + 1) + '">' + DDZ.cardSVG(c.id) + '</div>';
+        return '<button type="button" class="card' + sel + '" data-id="' + c.id +
+          '" data-idx="' + i + '" aria-label="' + DDZ.cardLabel(c.id) +
+          '" aria-pressed="' + (selection.has(c.id) ? 'true' : 'false') +
+          '" style="z-index:' + (i + 1) + '">' + DDZ.cardSVG(c.id) + '</button>';
       }).join('');
       handSelSig = ssig;
     } else if (ssig !== handSelSig) {
@@ -503,6 +575,7 @@
       for (var i = 0; i < nodes.length; i++) {
         var nid = Number(nodes[i].getAttribute('data-id'));
         nodes[i].classList.toggle('selected', selection.has(nid));
+        nodes[i].setAttribute('aria-pressed', selection.has(nid) ? 'true' : 'false');
       }
     }
   }
@@ -560,15 +633,24 @@
     }
   }
 
+  function renderOpenSettings() {
+    if ($('settingsModal').classList.contains('hidden')) return;
+    // 轮询期间保持设置面板与服务端一致；正在拖动速度滑杆时不抢走用户输入。
+    if (document.activeElement !== $('setSpeed')) {
+      $('setSpeed').value = state.settings.bot_delay_ms;
+      $('speedVal').textContent = (state.settings.bot_delay_ms / 1000).toFixed(1) + ' 秒';
+    }
+    $('setAuto').checked = state.settings.auto_pilot;
+    $('setVoice').checked = voiceEnabled;
+  }
+
   function showEls(ids, show) {
     ids.forEach(function (id) { $(id).classList.toggle('hidden', !show); });
   }
 
   function renderResult() {
     if (state.phase !== 'round_over' || !state.winners) {
-      if (!document.getElementById('resultModal').classList.contains('hidden')) {
-        document.getElementById('resultModal').classList.add('hidden');
-      }
+      if (!$('resultModal').classList.contains('hidden')) closeModal('resultModal');
       return;
     }
     if (state.version === lastShownResult) return;
@@ -588,7 +670,8 @@
     parts.push(notes.join(' · '));
     parts.push('累计比分：你 ' + state.scores[0] + '　上家 ' + state.scores[2] + '　下家 ' + state.scores[1]);
     $('resultBody').innerHTML = parts.map(function (p) { return '<div>' + p + '</div>'; }).join('');
-    $('resultModal').classList.remove('hidden');
+    if (!$('settingsModal').classList.contains('hidden')) closeModal('settingsModal');
+    openModal('resultModal', 'btnAgain');
     if (win) celebrateWin();
   }
 
@@ -648,18 +731,12 @@
     applyRangeSelection(dragState.anchor, idx);
   });
 
-  var lastDragEndAt = -1e9;   // 最近一次框选结束时间：只抑制"同一手势紧随派发的 click"
-
   function endDrag() {
     if (!dragState) return;
     var st = dragState;
     dragState = null;
     try { if (document.body) document.body.style.cursor = ''; } catch (e) {}
-    if (st.moved) {
-      // 框选松手后，浏览器会在极短时间内（<10ms，同一手势）同步派发一个 click；
-      // 记录时间戳，仅抑制这个紧随的 click，避免拖到牌缝误出牌。
-      lastDragEndAt = Date.now();
-    } else {
+    if (!st.moved) {
       // 单击：切换该牌的选中状态
       toggleSelect(st.id);
     }
@@ -667,42 +744,32 @@
   document.addEventListener('pointerup', endDrag);
   document.addEventListener('pointercancel', endDrag);
 
-  var lastBlankClickPlay = 0;   // 最近一次"空白单击出牌"时间（用于抑制双击误触不出）
-
-  function isBlankArea(t) {
-    return !(t && typeof t.closest === 'function' &&
-             (t.closest('.card') || t.closest('button')));
-  }
-
-  $('app').addEventListener('click', function (e) {
-    // 仅抑制框选松手同一手势紧随派发的 click（60ms 内）；
-    // 用户随后主动点击空白（移动+按下 > 60ms）立即出牌，无需点两次。
-    if (Date.now() - lastDragEndAt < 60) return;
-    if (!isBlankArea(e.target)) return;
-    if (!canActHuman() || selection.size === 0) return;
-    lastBlankClickPlay = Date.now();
-    playSelectedCards();
-  });
-
-  $('app').addEventListener('dblclick', function (e) {
-    if (!isBlankArea(e.target)) return;      // 牌上/按钮上不触发
-    if (Date.now() - lastBlankClickPlay < 600) return;  // 刚用空白单击出过牌
-    if (!canActHuman()) return;
-    if (!state.can_pass) { toast('现在不能不出（必须出牌）'); return; }
-    postAction({ action: 'pass' }).then(function (res) {
-      if (res.state) { state = res.state; render(); }
-    });
+  $('hand').addEventListener('keydown', function (e) {
+    var node = e.target && typeof e.target.closest === 'function'
+      ? e.target.closest('.card') : null;
+    if (!node || (e.key !== 'Enter' && e.key !== ' ')) return;
+    if (!canSelectCards()) return;
+    e.preventDefault();
+    e.stopPropagation();
+    toggleSelect(Number(node.getAttribute('data-id')));
   });
 
   function playSelectedCards() {
-    if (selection.size === 0) return;
-    var cards = Array.from(selection);   // Set → 数组（slice.call 对 Set 无效，会得到空数组）
-    selection = new Set();               // 乐观清空，立即反馈
-    renderHand();
+    if (selection.size === 0 || actionPending) return;
+    var cards = Array.from(selection);
+    actionPending = true;
     renderControls();
     postAction({ action: 'play', cards: cards }).then(function (res) {
-      if (!res.ok && res.error) toast(res.error, true);
-      if (res.state) { state = res.state; render(); }
+      actionPending = false;
+      if (!res.ok) {
+        if (res.error && res.error !== 'network') toast(res.error, true);
+        if (res.conflict && res.state) applyState(res.state);
+        renderControls();
+        return; // 非法出牌保留选择，玩家可以直接调整。
+      }
+      selection = new Set();
+      hideToast();
+      if (res.state) applyState(res.state);
     });
   }
 
@@ -712,12 +779,19 @@
   });
 
   $('btnPass').addEventListener('click', function () {
+    if (actionPending) return;
+    actionPending = true;
+    renderControls();
     postAction({ action: 'pass' }).then(function (res) {
-      if (res.state) { state = res.state; render(); }
+      actionPending = false;
+      if (!res.ok && res.error && res.error !== 'network') toast(res.error, true);
+      if (res.ok) hideToast();
+      if (res.state) applyState(res.state); else renderControls();
     });
   });
 
   $('btnHint').addEventListener('click', function () {
+    if (actionPending) return;
     postAction({ action: 'hint' }).then(function (res) {
       if (res.hint) {
         if (res.hint.kind === 'bid') {
@@ -737,23 +811,39 @@
           }
         }
       }
-      if (res.state) { state = res.state; render(); }
+      if (res.state) applyState(res.state);
     });
   });
 
   for (var v = 0; v <= 3; v++) {
     (function (val) {
       $('btnBid' + v).addEventListener('click', function () {
+        if (actionPending) return;
+        actionPending = true;
+        renderControls();
         postAction({ action: 'bid', bid: val }).then(function (res) {
-          if (res.state) { state = res.state; render(); }
+          actionPending = false;
+          if (!res.ok && res.error && res.error !== 'network') toast(res.error, true);
+          if (res.ok) hideToast();
+          if (res.state) applyState(res.state); else renderControls();
         });
       });
     })(v);
   }
 
   function newRound() {
+    if (actionPending) return;
+    actionPending = true;
+    renderControls();
     postAction({ action: 'new_round' }).then(function (res) {
+      actionPending = false;
+      if (!res.ok) {
+        if (res.error && res.error !== 'network') toast(res.error, true);
+        if (res.state) applyState(res.state); else renderControls();
+        return;
+      }
       selection = new Set();
+      hideToast();
       // 重置所有渲染缓存，确保新一局全新渲染、无上一局残留
       lastPlaySigs = ['', '', ''];
       lastSeatState = [null, null, null];
@@ -765,7 +855,7 @@
       lastBidEventSig = '';
       handCardsSig = '';
       handSelSig = '';
-      if (res.state) { state = res.state; render(); }
+      if (res.state) applyState(res.state);
     });
   }
 
@@ -777,11 +867,11 @@
     newRound();
   });
   $('btnAgain').addEventListener('click', function () {
-    $('resultModal').classList.add('hidden');
+    closeModal('resultModal');
     newRound();
   });
   $('btnCloseResult').addEventListener('click', function () {
-    $('resultModal').classList.add('hidden');
+    closeModal('resultModal');
   });
 
   /* ---------------- 设置 ---------------- */
@@ -791,10 +881,10 @@
     $('speedVal').textContent = (state.settings.bot_delay_ms / 1000).toFixed(1) + ' 秒';
     $('setAuto').checked = state.settings.auto_pilot;
     $('setVoice').checked = voiceEnabled;
-    $('settingsModal').classList.remove('hidden');
+    openModal('settingsModal', 'setSpeed');
   });
   $('btnCloseSettings').addEventListener('click', function () {
-    $('settingsModal').classList.add('hidden');
+    closeModal('settingsModal');
   });
 
   var delayTimer = null;
@@ -803,11 +893,17 @@
     clearTimeout(delayTimer);
     var ms = Number(this.value);
     delayTimer = setTimeout(function () {
-      postAction({ action: 'set_delay', ms: ms });
+      postAction({ action: 'set_delay', ms: ms }).then(function (res) {
+        if (!res.ok && res.error && res.error !== 'network') toast(res.error, true);
+        if (res.state) applyState(res.state);
+      });
     }, 300);
   });
   $('setAuto').addEventListener('change', function () {
-    postAction({ action: 'set_auto', on: this.checked });
+    postAction({ action: 'set_auto', on: this.checked }).then(function (res) {
+      if (!res.ok && res.error && res.error !== 'network') toast(res.error, true);
+      if (res.state) applyState(res.state);
+    });
   });
   $('setVoice').addEventListener('change', function () {
     voiceEnabled = this.checked;
@@ -818,8 +914,43 @@
     } catch (e) {}
   });
 
+  document.addEventListener('keydown', function (e) {
+    if (activeModal && !activeModal.classList.contains('hidden')) {
+      if (e.key === 'Escape' && activeModal.id !== 'welcomeModal') {
+        e.preventDefault();
+        closeModal(activeModal.id);
+        return;
+      }
+      if (e.key === 'Tab' && typeof activeModal.querySelectorAll === 'function') {
+        var focusable = activeModal.querySelectorAll(
+          'button:not(:disabled), input:not(:disabled), [tabindex]:not([tabindex="-1"])');
+        if (!focusable.length) return;
+        var first = focusable[0];
+        var last = focusable[focusable.length - 1];
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault(); last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault(); first.focus();
+        }
+      }
+      return;
+    }
+    var tag = e.target && e.target.tagName ? e.target.tagName.toLowerCase() : '';
+    if (tag === 'input' || tag === 'button') return;
+    if (e.key === 'Enter' && canActHuman() && selection.size > 0) {
+      e.preventDefault(); playSelectedCards();
+    } else if (e.key === ' ' && canActHuman() && state.can_pass) {
+      e.preventDefault(); $('btnPass').click();
+    }
+  });
+
   /* ---------------- 启动 ---------------- */
 
   poll();
-  setInterval(poll, 400);
+  pollTimer = setInterval(function () {
+    if (!document.hidden) poll();
+  }, 250);
+  document.addEventListener('visibilitychange', function () {
+    if (!document.hidden) poll();
+  });
 })();
