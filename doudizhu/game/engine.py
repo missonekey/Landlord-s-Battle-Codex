@@ -57,7 +57,7 @@ class Game:
         self.turn = self.starter
         self.bid_highest = 0
         self.bidder: Optional[int] = None
-        self.bids_taken = 0
+        self.pass_count = 0
         self.bid_points = 0
         self.landlord: Optional[int] = None
         self.bid_event: Optional[dict] = None   # 最近一次叫分事件（供前端语音播报）
@@ -73,7 +73,6 @@ class Game:
 
         self.winners: Optional[List[int]] = None
         self.round_result: Optional[str] = None
-        self.round_scores: Optional[List[int]] = None
         self.spring = False
         self.anti_spring = False
         self.multiplier = 1
@@ -90,22 +89,6 @@ class Game:
     # 叫地主
     # ------------------------------------------------------------------
 
-    def _appoint_landlord(self) -> None:
-        """结束叫分并让最高叫分者成为地主。"""
-        if self.bidder is None:
-            raise RuntimeError("没有叫分者，无法确定地主")
-        self.landlord = self.bidder
-        self.bid_points = self.bid_highest
-        self.hands[self.landlord] = sort_hand(self.hands[self.landlord] + self.bottom)
-        self.phase = PHASE_PLAYING
-        self.turn = self.landlord
-        self.bid_event = {
-            "kind": "landlord", "bid": self.bid_points, "player": self.landlord,
-        }
-        self._log("%s 成为地主（%d 分），底牌：%s。"
-                  % (PLAYER_NAMES[self.landlord], self.bid_points,
-                     " ".join(card_name(c) for c in self.bottom)))
-
     def bid(self, player: int, value: int) -> None:
         """叫分：value=0 不叫，1/2/3 叫分（必须高于当前最高分）。"""
         if self.phase != PHASE_BIDDING:
@@ -117,29 +100,35 @@ class Game:
         if value != 0 and value <= self.bid_highest:
             raise ValueError("叫分必须高于当前最高分 %d 分" % self.bid_highest)
 
-        self.bids_taken += 1
         if value == 0:
+            self.pass_count += 1
             self.bid_event = {"kind": "pass", "player": player}
             self._log("%s 不叫。" % PLAYER_NAMES[player])
         else:
             self.bid_highest = value
             self.bidder = player
+            self.pass_count = 0
             self.bid_event = {"kind": "bid", "bid": value, "player": player}
             self._log("%s 叫 %d 分。" % (PLAYER_NAMES[player], value))
 
-        # 标准叫分：三名玩家各叫一次；任何人叫 3 分立即成为地主。
-        if value == 3:
-            self._appoint_landlord()
-        elif self.bids_taken == 3 and self.bidder is None:
+        if self.pass_count == 3:
             self._log("三家都不叫，重新发牌。")
             if self.deal_no >= MAX_DEALS_PER_ROUND:
                 raise RuntimeError("重新发牌次数过多")
-            self._deal()
-            # _deal 会重置叫分状态；重设事件供前端播报“重新发牌”。
             self.bid_event = {"kind": "redeal"}
+            self._deal()
             return
-        elif self.bids_taken == 3:
-            self._appoint_landlord()
+
+        if self.bidder is not None and self.pass_count == 2:
+            self.landlord = self.bidder
+            self.bid_points = self.bid_highest
+            self.hands[self.landlord] = sort_hand(self.hands[self.landlord] + self.bottom)
+            self.phase = PHASE_PLAYING
+            self.turn = self.landlord
+            self.bid_event = {"kind": "landlord", "bid": self.bid_points, "player": self.landlord}
+            self._log("%s 成为地主（%d 分），底牌：%s。"
+                      % (PLAYER_NAMES[self.landlord], self.bid_points,
+                         " ".join(card_name(c) for c in self.bottom)))
         else:
             self.turn = (self.turn + 1) % 3
         self.version += 1
@@ -175,7 +164,6 @@ class Game:
             self.bombs_used += 1
         elif combo.type == rules.COMBO_ROCKET:
             self.rockets_used += 1
-        self.multiplier = 2 ** (self.bombs_used + self.rockets_used)
 
         self.last_combo = combo
         self.last_player = player
@@ -281,13 +269,9 @@ class Game:
         else:
             farmers = [p for p in range(3) if p != self.landlord]
             ctx["opp_min"] = min(len(self.hands[p]) for p in farmers)
-        # 记牌：每张牌值还剩多少在自己手牌之外；不能把自己的牌误算作对手牌。
-        own_ranks = Counter(rank_of(c) for c in self.hands[player])
-        ctx["remaining"] = {
-            r: max(0, (1 if r >= RANK_JOKER_SMALL else 4)
-                   - self.played_ranks[r] - own_ranks[r])
-            for r in range(3, RANK_JOKER_BIG + 1)
-        }
+        # 记牌：每张牌值还剩多少在外面（大师级 AI 用）
+        ctx["remaining"] = {r: (1 if r >= RANK_JOKER_SMALL else 4) - self.played_ranks[r]
+                            for r in range(3, RANK_JOKER_BIG + 1)}
         return ctx
 
     def bot_move(self, player: int) -> None:
@@ -318,115 +302,6 @@ class Game:
             cards = ai.suggest(self.hands[self.human], self.last_combo, ctx)
             return {"kind": "play", "cards": cards or [], "pass": cards is None}
         return {"kind": "none"}
-
-    # ------------------------------------------------------------------
-    # 本地持久化
-    # ------------------------------------------------------------------
-
-    def export_state(self) -> dict:
-        """导出可安全写入 JSON 的对局状态；不包含任何渲染器对象。"""
-        return {
-            "schema": 1,
-            "human": self.human,
-            "scores": list(self.scores),
-            "round_no": self.round_no,
-            "version": self.version,
-            "log": list(self.log),
-            "deal_no": self.deal_no,
-            "hands": [list(h) for h in self.hands],
-            "bottom": list(self.bottom),
-            "phase": self.phase,
-            "starter": self.starter,
-            "turn": self.turn,
-            "bid_highest": self.bid_highest,
-            "bidder": self.bidder,
-            "bids_taken": self.bids_taken,
-            "bid_points": self.bid_points,
-            "landlord": self.landlord,
-            "bid_event": self.bid_event,
-            "last_combo_cards": (list(self.last_combo.cards)
-                                 if self.last_combo is not None else None),
-            "last_player": self.last_player,
-            "trick_passes": self.trick_passes,
-            "last_plays": self.last_plays,
-            "plays_count": list(self.plays_count),
-            "bombs_used": self.bombs_used,
-            "rockets_used": self.rockets_used,
-            "played_ranks": dict(self.played_ranks),
-            "winners": self.winners,
-            "round_result": self.round_result,
-            "round_scores": self.round_scores,
-            "spring": self.spring,
-            "anti_spring": self.anti_spring,
-            "multiplier": self.multiplier,
-        }
-
-    @classmethod
-    def from_state(cls, data: dict) -> "Game":
-        """从受版本约束的 JSON 状态恢复；损坏数据由调用方回退为新局。"""
-        if not isinstance(data, dict) or data.get("schema") != 1:
-            raise ValueError("不支持的存档格式")
-        g = cls(human=int(data.get("human", 0)))
-        g.scores = [int(v) for v in data["scores"]]
-        g.round_no = int(data["round_no"])
-        g.version = int(data["version"])
-        g.log = [str(v) for v in data.get("log", [])][-40:]
-        g.deal_no = int(data["deal_no"])
-        g.hands = [[int(c) for c in hand] for hand in data["hands"]]
-        g.bottom = [int(c) for c in data["bottom"]]
-        g.phase = str(data["phase"])
-        g.starter = int(data["starter"])
-        g.turn = int(data["turn"])
-        g.bid_highest = int(data["bid_highest"])
-        g.bidder = (None if data.get("bidder") is None
-                    else int(data["bidder"]))
-        g.bids_taken = int(data.get("bids_taken", 0))
-        g.bid_points = int(data["bid_points"])
-        g.landlord = (None if data.get("landlord") is None
-                      else int(data["landlord"]))
-        g.bid_event = data.get("bid_event")
-        combo_cards = data.get("last_combo_cards")
-        g.last_combo = rules.classify(combo_cards) if combo_cards else None
-        if combo_cards and g.last_combo is None:
-            raise ValueError("存档中的当前牌型无效")
-        g.last_player = (None if data.get("last_player") is None
-                         else int(data["last_player"]))
-        g.trick_passes = int(data["trick_passes"])
-        g.last_plays = list(data["last_plays"])
-        g.plays_count = [int(v) for v in data["plays_count"]]
-        g.bombs_used = int(data["bombs_used"])
-        g.rockets_used = int(data["rockets_used"])
-        g.played_ranks = Counter({int(k): int(v)
-                                  for k, v in data.get("played_ranks", {}).items()})
-        winners = data.get("winners")
-        g.winners = None if winners is None else [int(v) for v in winners]
-        g.round_result = data.get("round_result")
-        round_scores = data.get("round_scores")
-        g.round_scores = (None if round_scores is None
-                          else [int(v) for v in round_scores])
-        g.spring = bool(data.get("spring", False))
-        g.anti_spring = bool(data.get("anti_spring", False))
-        g.multiplier = int(data.get("multiplier", 1))
-
-        if len(g.scores) != 3 or len(g.hands) != 3 \
-                or len(g.last_plays) != 3 or len(g.plays_count) != 3:
-            raise ValueError("存档玩家数量无效")
-        if g.phase not in (PHASE_BIDDING, PHASE_PLAYING, PHASE_OVER):
-            raise ValueError("存档阶段无效")
-        hand_cards = [c for hand in g.hands for c in hand]
-        if any(c < 0 or c >= 54 for c in hand_cards + g.bottom):
-            raise ValueError("存档牌面无效")
-        if len(g.bottom) != 3 or len(hand_cards) != len(set(hand_cards)):
-            raise ValueError("存档手牌重复")
-        if g.bidder is not None and g.bidder not in (0, 1, 2):
-            raise ValueError("存档叫分玩家无效")
-        if g.landlord is not None and g.landlord not in (0, 1, 2):
-            raise ValueError("存档地主无效")
-        if g.last_player is not None and g.last_player not in (0, 1, 2):
-            raise ValueError("存档出牌玩家无效")
-        if g.round_scores is not None and len(g.round_scores) != 3:
-            raise ValueError("存档结算分数无效")
-        return g
 
     # ------------------------------------------------------------------
     # 快照
@@ -461,19 +336,16 @@ class Game:
             },
             "hand_counts": [len(h) for h in self.hands],
             "bottom_visible": self.landlord is not None,
-            "bottom_count": len(self.bottom),
-            "bottom": ([{"id": c, "rank": rank_of(c),
-                         "suit": (c // 13) if c < 52 else None}
-                        for c in self.bottom]
-                       if self.landlord is not None else []),
+            "bottom": [{"id": c, "rank": rank_of(c), "suit": (c // 13) if c < 52 else None}
+                       for c in self.bottom],
             "last_plays": self.last_plays,
             "bombs_used": self.bombs_used,
             "rockets_used": self.rockets_used,
-            "multiplier": self.multiplier,
+            "multiplier": 2 ** (self.bombs_used + self.rockets_used),
             "spring": self.spring,
             "anti_spring": self.anti_spring,
             "scores": list(self.scores),
-            "round_scores": self.round_scores,
+            "round_scores": getattr(self, "round_scores", None),
             "winners": self.winners,
             "round_result": self.round_result,
             "plays_count": list(self.plays_count),

@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>斗地主 · Dou Dizhu</title>
 <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
-<link rel="stylesheet" href="css/style.css?v=1.2.0">
+<link rel="stylesheet" href="css/style.css">
 </head>
 <body>
 <div id="app">
@@ -44,7 +44,7 @@
 
       <section class="center-head">
         <div class="bottom-cards" id="bottomCards"></div>
-        <div class="status" id="status" role="status" aria-live="polite">正在发牌…</div>
+        <div class="status" id="status">正在发牌…</div>
         <div class="mult-row" id="multRow"></div>
         <div class="log-line" id="logLine"></div>
       </section>
@@ -63,7 +63,7 @@
     </div>
 
     <!-- 中央对战区：三家出牌都集中显示在这里 -->
-    <div class="battlefield" aria-label="中央出牌区">
+    <div class="battlefield">
       <div class="turn-arrow arrow-ul" id="arrow2">▼</div>
       <div class="turn-arrow arrow-ur" id="arrow1">▼</div>
       <div class="turn-arrow arrow-dn" id="arrow0">▲</div>
@@ -100,8 +100,8 @@
       <!-- 操作栏 -->
       <footer class="controls" id="controls">
         <div class="ctrl-buttons" id="ctrlButtons">
-          <button id="btnPass" class="btn" type="button" aria-keyshortcuts="Space">不出</button>
-          <button id="btnPlay" class="btn primary" type="button" aria-keyshortcuts="Enter">出牌</button>
+          <button id="btnPass" class="btn" type="button">不出</button>
+          <button id="btnPlay" class="btn primary" type="button">出牌</button>
           <button id="btnHint" class="btn ghost" type="button">提示</button>
         </div>
         <div class="ctrl-hint" id="ctrlHint"></div>
@@ -113,9 +113,9 @@
 </div>
 
 <!-- 开始游戏弹窗（页面打开且游戏未开始时显示） -->
-<div class="modal-mask hidden" id="welcomeModal" role="dialog" aria-modal="true" aria-labelledby="welcomeTitle">
+<div class="modal-mask" id="welcomeModal">
   <div class="modal">
-    <div class="modal-title" id="welcomeTitle">划水快乐，勤劳的人！</div>
+    <div class="modal-title">划水快乐，勤劳的人！</div>
     <div class="modal-body">欢迎来到斗地主，祝你牌运亨通 🎉</div>
     <div class="modal-actions">
       <button id="btnStartGame" class="btn primary" type="button">开始游戏</button>
@@ -124,7 +124,7 @@
 </div>
 
 <!-- 结算弹窗 -->
-<div class="modal-mask hidden" id="resultModal" role="dialog" aria-modal="true" aria-labelledby="resultTitle">
+<div class="modal-mask hidden" id="resultModal">
   <div class="modal">
     <div class="modal-title" id="resultTitle"></div>
     <div class="modal-body" id="resultBody"></div>
@@ -136,13 +136,13 @@
 </div>
 
 <!-- 设置弹窗 -->
-<div class="modal-mask hidden" id="settingsModal" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+<div class="modal-mask hidden" id="settingsModal">
   <div class="modal">
-    <div class="modal-title" id="settingsTitle">设置</div>
+    <div class="modal-title">设置</div>
     <div class="modal-body settings-body">
       <label class="setting-row">
         <span>电脑出牌速度</span>
-        <input type="range" id="setSpeed" min="500" max="2500" step="100" value="900">
+        <input type="range" id="setSpeed" min="200" max="2500" step="100" value="900">
         <span class="speed-val" id="speedVal">0.9 秒</span>
       </label>
       <label class="setting-row">
@@ -161,9 +161,9 @@
   </div>
 </div>
 
-<div class="toast hidden" id="toast" role="status" aria-live="assertive"></div>
+<div class="toast hidden" id="toast"></div>
 
-<script src="js/render.js?v=1.2.0"></script>
-<script src="js/main.js?v=1.2.0"></script>
+<script src="js/render.js"></script>
+<script src="js/main.js"></script>
 </body>
 </html>

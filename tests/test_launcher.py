@@ -24,17 +24,14 @@ def _env():
     env["DOUDIZHU_PORT_BASE"] = str(PORT_BASE)
     env["DOUDIZHU_PIDFILE"] = os.path.join(tempfile.gettempdir(),
                                            "doudizhu_test_server.json")
-    env["DOUDIZHU_STATE_PATH"] = os.path.join(tempfile.gettempdir(),
-                                               "doudizhu_test_state.json")
     return env
 
 
 def _ping(port, timeout=0.5):
     try:
         with urllib.request.urlopen(
-                "http://127.0.0.1:%d/api/health" % port, timeout=timeout) as r:
-            data = json.loads(r.read().decode("utf-8"))
-            return r.status == 200 and data.get("service") == "doudizhu"
+                "http://127.0.0.1:%d/api/state" % port, timeout=timeout) as r:
+            return r.status == 200
     except Exception:
         return False
 
@@ -45,11 +42,6 @@ class TestLauncher(unittest.TestCase):
         subprocess.run([sys.executable, _STOP], env=_env(),
                        capture_output=True, timeout=30)
         time.sleep(0.3)
-        for path in (_env()["DOUDIZHU_PIDFILE"], _env()["DOUDIZHU_STATE_PATH"]):
-            try:
-                os.remove(path)
-            except OSError:
-                pass
 
     def tearDown(self):
         subprocess.run([sys.executable, _STOP], env=_env(),
@@ -65,7 +57,6 @@ class TestLauncher(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr.decode())
         out = r.stdout.decode()
         self.assertIn("斗地主游戏服务器已启动", out)
-        self.assertIn("CODEX_GAME_URL=", out)
         # 端口可能自动回退（起始端口被占时），以实际输出为准
         m = re.search(r"http://127\.0\.0\.1:(\d+)/", out)
         self.assertIsNotNone(m, out)

@@ -3,13 +3,13 @@
 """斗地主游戏启动脚本（守护进程模式）。
 
 行为:
-  1. 若已有斗地主服务器在运行 → 输出内置浏览器地址并退出（可重复调用）。
+  1. 若已有斗地主服务器在运行 → 直接打开浏览器并退出（可重复调用）。
   2. 否则在后台启动一个脱离终端的服务器进程（不会随本命令结束而退出），
-     等待其就绪后输出地址，然后本命令立即返回。
+     等待其就绪后自动打开浏览器，然后本命令立即返回。
 
 用法:
-    python3 start_game.py               # 启动（或复用），供 Codex 内置 Browser 打开
-    python3 start_game.py --system-browser  # 手动运行时显式打开系统浏览器
+    python3 start_game.py            # 启动（或复用）并打开浏览器
+    python3 start_game.py --no-browser  # 只启动不打开浏览器（测试用）
 停止:
     python3 scripts/stop_game.py
 """
@@ -23,6 +23,7 @@ import sys
 import tempfile
 import time
 import urllib.request
+import webbrowser
 
 _GAME_DIR = os.path.normpath(
     os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir, "game")
@@ -32,18 +33,14 @@ DEFAULT_PORT_BASE = 8765
 PORT_RANGE = 20
 
 
-def _health(port: int, timeout: float = 0.4):
+def _ping(port: int, timeout: float = 0.4) -> bool:
     """探测指定端口是否在运行斗地主服务器。"""
     try:
         with urllib.request.urlopen(
-                "http://127.0.0.1:%d/api/health" % port, timeout=timeout) as r:
-            data = json.loads(r.read().decode("utf-8"))
-            if r.status == 200 and data.get("service") == "doudizhu" \
-                    and data.get("instance_id") and data.get("pid"):
-                return data
+                "http://127.0.0.1:%d/api/state" % port, timeout=timeout) as r:
+            return r.status == 200
     except Exception:
-        pass
-    return None
+        return False
 
 
 def _port_base() -> int:
@@ -51,33 +48,22 @@ def _port_base() -> int:
 
 
 def _pidfile_path() -> str:
-    uid = os.getuid() if hasattr(os, "getuid") else "user"
     return os.environ.get("DOUDIZHU_PIDFILE",
-                          os.path.join(tempfile.gettempdir(),
-                                       "doudizhu_server_%s.json" % uid))
+                          os.path.join(tempfile.gettempdir(), "doudizhu_server.json"))
 
 
-def _state_path() -> str:
-    root = os.environ.get("PLUGIN_DATA")
-    if not root:
-        uid = os.getuid() if hasattr(os, "getuid") else "user"
-        root = os.path.join(tempfile.gettempdir(), "doudizhu_%s" % uid)
-    return os.environ.get("DOUDIZHU_STATE_PATH", os.path.join(root, "state.json"))
-
-
-def _find_running():
+def _find_running() -> int:
     base = _port_base()
     for p in range(base, base + PORT_RANGE):
-        health = _health(p)
-        if health:
-            return p, health
-    return -1, None
+        if _ping(p):
+            return p
+    return -1
 
 
 def _free_port() -> int:
     base = _port_base()
     for p in range(base, base + PORT_RANGE):
-        if _health(p, timeout=0.25):
+        if _ping(p, timeout=0.25):
             continue
         # 确认端口本身可绑定（避免被其它程序占用但未响应 /api/state）
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -94,17 +80,15 @@ def _free_port() -> int:
 
 
 def main() -> int:
-    system_browser = "--system-browser" in sys.argv
+    no_browser = "--no-browser" in sys.argv
 
     # 1) 已有实例 → 直接复用
-    running, _ = _find_running()
+    running = _find_running()
     if running >= 0:
         url = "http://127.0.0.1:%d/" % running
         print("斗地主游戏已在运行：%s" % url, flush=True)
-        print("CODEX_GAME_URL=%s" % url, flush=True)
         print("（停止服务器：python3 scripts/stop_game.py）", flush=True)
-        if system_browser:
-            import webbrowser
+        if not no_browser:
             webbrowser.open(url)
         return 0
 
@@ -125,8 +109,7 @@ def main() -> int:
     try:
         proc = subprocess.Popen(
             [sys.executable, "-u", _SERVER_PY,
-             "--port", str(port), "--pidfile", pidfile,
-             "--state-path", _state_path(), "--no-browser"],
+             "--port", str(port), "--pidfile", pidfile, "--no-browser"],
             stdout=log, stderr=log, stdin=subprocess.DEVNULL,
             start_new_session=True,  # 脱离终端/进程组，命令退出后继续运行
         )
@@ -137,16 +120,14 @@ def main() -> int:
     # 3) 等待服务器就绪
     deadline = time.time() + 10
     while time.time() < deadline:
-        if _health(port, timeout=0.3):
+        if _ping(port, timeout=0.3):
             url = "http://127.0.0.1:%d/" % port
             print("=" * 46, flush=True)
             print("  斗地主游戏服务器已启动", flush=True)
-            print("  请在 Codex 内置浏览器打开: %s" % url, flush=True)
+            print("  请在浏览器打开: %s" % url, flush=True)
             print("  停止服务器: python3 scripts/stop_game.py", flush=True)
             print("=" * 46, flush=True)
-            print("CODEX_GAME_URL=%s" % url, flush=True)
-            if system_browser:
-                import webbrowser
+            if not no_browser:
                 webbrowser.open(url)
             return 0
         if proc.poll() is not None:

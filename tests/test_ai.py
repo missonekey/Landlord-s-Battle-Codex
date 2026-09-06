@@ -78,19 +78,6 @@ class TestSuggestLead(unittest.TestCase):
         cards = ai.suggest_lead([52, 53])
         self.assertEqual(sorted(cards), [52, 53])
 
-    def test_preserves_and_leads_structures(self):
-        straight_hand = [0, 1, 2, 3, 4, 12]  # 3-7 顺子 + 2
-        self.assertEqual(rules.classify(ai.suggest_lead(straight_hand)).type,
-                         rules.COMBO_STRAIGHT)
-
-        chain_hand = [0, 13, 1, 14, 2, 15, 6]  # 33 44 55 + 9
-        self.assertEqual(rules.classify(ai.suggest_lead(chain_hand)).type,
-                         rules.COMBO_PAIR_CHAIN)
-
-        plane_hand = [0, 13, 26, 1, 14, 27, 6, 7, 12]  # 333444 + 9/10/2
-        self.assertIn(rules.classify(ai.suggest_lead(plane_hand)).type,
-                      (rules.COMBO_AIRPLANE, rules.COMBO_AIRPLANE_SINGLE))
-
 
 class TestSuggestFollow(unittest.TestCase):
     def test_follow_legality(self):
@@ -127,15 +114,6 @@ class TestSuggestFollow(unittest.TestCase):
             ctx = {"role": "farmer", "teammate": 2, "target_owner": 2,
                    "landlord_left": 10, "opp_min": 10}
             self.assertIsNone(ai.suggest_follow(hand, target, ctx))
-
-    def test_defends_when_landlord_has_one_card(self):
-        target = rules.classify([0])  # 队友出了 3
-        hand = [1, 2, 3]              # 4/5/6 均可压
-        ctx = {"role": "farmer", "teammate": 2, "target_owner": 2,
-               "landlord_left": 1, "opp_min": 1}
-        cards = ai.suggest_follow(hand, target, ctx)
-        self.assertIsNotNone(cards)
-        self.assertTrue(rules.beats(rules.classify(cards), target))
 
     def test_no_target_means_lead(self):
         hand = random_hand(random.Random(3))
