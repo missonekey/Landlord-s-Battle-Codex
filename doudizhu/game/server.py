@@ -28,7 +28,7 @@ from engine import PHASE_BIDDING, PHASE_PLAYING, Game
 GAME_DIR = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_PORT = 8765
 APP_ID = "codex-doudizhu"
-APP_VERSION = "1.1.0"
+APP_VERSION = "1.2.1"
 MAX_BODY_BYTES = 16 * 1024
 MAX_HTTP_WORKERS = 32
 SESSION_COOKIE = "ddz_session"

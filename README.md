@@ -2,6 +2,9 @@
 
 一个完整复刻标准「斗地主」规则的卡牌游戏，以 **Codex 插件**形式分发：在 Codex 中一句话即可启动，本地浏览器对战两名策略 AI。
 
+- **开发者**：cara，chen
+- **版本**：1.2.1
+
 - 🎮 完整标准规则：叫分制叫地主（不叫 / 1 / 2 / 3 分）、底牌、全部牌型、炸弹/王炸/春天/反春翻倍
 - 🧠 两名「Codex 参与」的 AI 玩家：内置策略引擎，优先顺子、连对、飞机和三带，结合剩余牌数与队友状态出牌
 - 🔉 游戏声音：出牌/不出语音播报（对三、要不起、炸弹、王炸…）+ 按钮点击音效，可一键关闭
@@ -16,14 +19,20 @@
 
 ### 方式 A：从市场安装（推荐，适合使用者）
 
-本仓库自带**仓库级市场文件** `.agents/plugins/marketplace.json`（符合 Codex 插件规范），发布者把仓库推到 GitHub 等平台后，使用者只需：
+本仓库自带**仓库级市场文件** `.agents/plugins/marketplace.json`（符合 Codex 插件规范）。GitHub 仓库地址：
+
+<https://github.com/missonekey/Landlord-s-Battle-Codex>
+
+使用者执行：
 
 ```bash
-codex plugin marketplace add <仓库地址>   # 例如 https://github.com/你的用户名/doudizhu
-codex plugin install doudizhu
+codex plugin marketplace add missonekey/Landlord-s-Battle-Codex --ref main
+codex plugin add doudizhu@doudizhu-marketplace
 ```
 
-然后在 Codex 中说「玩斗地主」即可。
+安装后新建一个 Codex 对话，说「玩斗地主」即可。也可以在 Codex 的插件页添加上述 GitHub 仓库市场，再安装“斗地主 Dou Dizhu”。
+
+> 若要让任何人安装，请将 GitHub 仓库设为 Public；Private 仓库只对拥有该仓库读取权限的账号可用。
 
 ### 方式 B：个人市场安装（作者本机）
 
@@ -47,8 +56,8 @@ python3 ~/plugins/doudizhu/scripts/start_game.py   # 手动启动游戏
 
 1. 保持仓库根目录下的 `.agents/plugins/marketplace.json` 与 `doudizhu/` 插件目录不动。
 2. 把整个仓库推送到公开仓库（如 GitHub）。
-3. 告诉使用者执行 `codex plugin marketplace add <仓库地址>` + `codex plugin install doudizhu`。
-4. 发布新版本时：修改 `doudizhu/.codex-plugin/plugin.json` 的 `version` 并推送即可。
+3. 告诉使用者执行 `codex plugin marketplace add missonekey/Landlord-s-Battle-Codex --ref main` + `codex plugin add doudizhu@doudizhu-marketplace`。
+4. 发布新版本时：同步修改 `doudizhu/plugin.json`、`doudizhu/.codex-plugin/plugin.json` 和 `doudizhu/game/server.py` 中的版本号，再推送。
 
 > 游戏运行时零第三方依赖（Python 3.7+ 标准库 + 现代浏览器）。启动/停止脚本主要面向 macOS/Linux，安全停止需要 `lsof`；Windows 可前台运行服务器并用 Ctrl+C 停止。
 
@@ -89,7 +98,8 @@ Codex 会运行 `python3 scripts/start_game.py`：
 
 ```
 doudizhu/                      # 插件根目录
-├── .codex-plugin/plugin.json  # Codex 插件清单（官方规范）
+├── plugin.json                # Agent Plugins 1.0 主清单
+├── .codex-plugin/plugin.json  # Codex 界面兼容清单
 ├── skills/play-doudizhu/      # 技能：指导 Codex 启动游戏
 ├── scripts/
 │   ├── start_game.py          # 守护进程式启动：后台起服务器 + 打开浏览器

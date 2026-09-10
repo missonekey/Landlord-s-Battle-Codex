@@ -1,10 +1,12 @@
 {
   "name": "doudizhu",
-  "version": "1.1.0",
+  "version": "1.2.1",
   "description": "斗地主（Dou Dizhu）卡牌游戏插件：完整标准规则的本地网页版斗地主，您是主玩家，另两位由内置策略 AI 扮演。",
   "author": {
-    "name": "Landlord's Battle Codex"
+    "name": "cara，chen"
   },
+  "homepage": "https://github.com/missonekey/Landlord-s-Battle-Codex",
+  "repository": "https://github.com/missonekey/Landlord-s-Battle-Codex",
   "license": "MIT",
   "keywords": [
     "doudizhu",
@@ -20,13 +22,15 @@
     "displayName": "斗地主 Dou Dizhu",
     "shortDescription": "完整规则斗地主：本地网页对战两名策略 AI",
     "longDescription": "一个严格复刻标准「斗地主」规则的本地网页卡牌游戏。支持叫分制叫地主（不叫/1分/2分/3分）、全部牌型（单张、对子、三带一/二、顺子、连对、飞机带翼、四带二、炸弹、王炸）、炸弹与王炸翻倍、春天/反春翻倍。插件在本地启动游戏服务器并在浏览器中打开界面，您作为主玩家，另外两位由内置策略引擎 AI 扮演。卡牌全部由 SVG 手绘，界面简洁清晰，完全离线运行。",
-    "developerName": "Landlord's Battle Codex",
+    "developerName": "cara，chen",
     "category": "Games",
     "capabilities": [
       "Interactive"
     ],
     "brandColor": "#1B7A3D",
     "composerIcon": "./assets/icon.png",
-    "logo": "./assets/logo.png"
+    "logo": "./assets/logo.png",
+    "websiteURL": "https://github.com/missonekey/Landlord-s-Battle-Codex",
+    "defaultPrompt": "启动斗地主游戏，让我在 Codex 浏览器中与两名策略 AI 对战。"
   }
 }

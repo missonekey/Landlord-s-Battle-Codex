@@ -1,0 +1,22 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "doudizhu",
+  "version": "1.2.1",
+  "description": "斗地主（Dou Dizhu）卡牌游戏插件：完整标准规则的本地网页版斗地主，您是主玩家，另两位由内置策略 AI 扮演。",
+  "author": {
+    "name": "cara，chen",
+    "url": "https://github.com/missonekey"
+  },
+  "homepage": "https://github.com/missonekey/Landlord-s-Battle-Codex",
+  "repository": "https://github.com/missonekey/Landlord-s-Battle-Codex",
+  "license": "MIT",
+  "keywords": [
+    "doudizhu",
+    "dou-di-zhu",
+    "landlord",
+    "斗地主",
+    "card game",
+    "poker",
+    "game"
+  ]
+}
