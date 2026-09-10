@@ -14,6 +14,12 @@
   var lastSeatState = [null, null, null];
   var lastBottomSig = '';
   var lastErrorToastAt = 0;
+  var stateEtag = '';
+  var pollTimer = null;
+  var actionPending = false;
+  var requestGeneration = 0;
+  var newRoundQueued = false;
+  var currentActionController = null;
 
   // 游戏声音总开关：语音播报 + 按钮音效（默认开启，localStorage 持久化）
   var voiceEnabled = true;
@@ -29,32 +35,94 @@
   /* ---------------- 网络 ---------------- */
 
   function getState() {
-    return fetch('/api/state', { cache: 'no-store' })
-      .then(function (r) { return r.json(); });
+    var headers = {};
+    if (stateEtag) headers['If-None-Match'] = stateEtag;
+    return fetch('/api/state', { cache: 'no-cache', headers: headers })
+      .then(function (r) {
+        if (r.status === 304) return null;
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        if (r.headers && typeof r.headers.get === 'function') {
+          stateEtag = r.headers.get('ETag') || '';
+        }
+        return r.json();
+      });
   }
 
-  function postAction(payload) {
-    return fetch('/api/action', {
+  function postAction(payload, signal) {
+    requestGeneration++;
+    var options = {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
-    }).then(function (r) { return r.json(); });
+    };
+    if (signal) options.signal = signal;
+    return fetch('/api/action', options)
+      .then(function (r) { requestGeneration++; return r.json(); });
+  }
+
+  function actionError() {
+    toast('操作未送达游戏服务器，请稍后重试', true);
+  }
+
+  function submitAction(payload, onSuccess) {
+    if (actionPending) return;
+    actionPending = true;
+    var controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    currentActionController = controller;
+    if (state) renderControls();
+    return postAction(payload, controller && controller.signal).then(function (res) {
+      actionPending = false;
+      currentActionController = null;
+      if (!res.ok) toast(res.error || '操作失败，请重试', true);
+      if (res.ok && onSuccess) onSuccess(res);
+      if (res.state) { state = res.state; render(); }
+      else if (state) renderControls();
+      schedulePoll(100);
+      flushQueuedNewRound();
+    }).catch(function () {
+      actionPending = false;
+      currentActionController = null;
+      if (!newRoundQueued) actionError();
+      if (state) renderControls();
+      flushQueuedNewRound();
+    });
+  }
+
+  function nextPollDelay() {
+    if (!state || !state.settings) return 400;
+    if (document.hidden) return 1000;
+    if (state.phase === 'round_over') return 2000;
+    if (state.human_turn && !state.settings.auto_pilot) return 1000;
+    return Math.max(100, Math.min(400, Math.floor(state.settings.bot_delay_ms / 2)));
+  }
+
+  function schedulePoll(delay) {
+    clearTimeout(pollTimer);
+    pollTimer = setTimeout(poll, delay == null ? nextPollDelay() : delay);
   }
 
   function poll() {
     if (polling) return;
     polling = true;
+    var generation = requestGeneration;
     getState().then(function (s) {
-      state = s;
-      render();
-      voiceReady = true;
+      if (s && !actionPending && generation === requestGeneration) {
+        state = s;
+        render();
+        voiceReady = true;
+      } else if (s) {
+        stateEtag = '';
+      }
     }).catch(function () {
       var now = Date.now();
       if (now - lastErrorToastAt > 5000) {
         lastErrorToastAt = now;
         toast('与游戏服务器连接失败，请刷新页面重试', true);
       }
-    }).then(function () { polling = false; });
+    }).then(function () {
+      polling = false;
+      schedulePoll();
+    });
   }
 
   /* ---------------- 工具 ---------------- */
@@ -71,14 +139,56 @@
   function canActHuman() {
     if (!state) return false;
     return (state.phase === 'bidding' || state.phase === 'playing') &&
-      state.human_turn && !state.settings.auto_pilot;
+      state.human_turn && !state.settings.auto_pilot && !actionPending;
   }
 
   // 可选牌（仅出牌阶段；叫分阶段不允许点选手牌）
   function canSelectCards() {
     if (!state) return false;
-    return state.phase === 'playing' && state.human_turn && !state.settings.auto_pilot;
+    return state.phase === 'playing' && canActHuman();
   }
+
+  var activeModal = null;
+  var returnFocus = null;
+  var modalControls = {
+    welcomeModal: ['btnStartGame'],
+    settingsModal: ['setSpeed', 'setAuto', 'setVoice', 'btnCloseSettings'],
+    resultModal: ['btnAgain', 'btnCloseResult']
+  };
+
+  function openModal(id) {
+    if (activeModal === id) return;
+    if (activeModal) closeModal(activeModal);
+    returnFocus = document.activeElement;
+    activeModal = id;
+    $(id).classList.remove('hidden');
+    $(id).setAttribute('aria-hidden', 'false');
+    $(modalControls[id][0]).focus();
+    $('app').inert = true;
+  }
+
+  function closeModal(id) {
+    $(id).classList.add('hidden');
+    $(id).setAttribute('aria-hidden', 'true');
+    if (activeModal !== id) return;
+    activeModal = null;
+    $('app').inert = false;
+    if (returnFocus && typeof returnFocus.focus === 'function') returnFocus.focus();
+    returnFocus = null;
+  }
+
+  document.addEventListener('keydown', function (e) {
+    if (!activeModal) return;
+    if (e.key === 'Escape' && activeModal !== 'welcomeModal') {
+      e.preventDefault();
+      closeModal(activeModal);
+    } else if (e.key === 'Tab') {
+      var controls = modalControls[activeModal].map($);
+      var index = controls.indexOf(document.activeElement);
+      e.preventDefault();
+      controls[(index + (e.shiftKey ? controls.length - 1 : 1)) % controls.length].focus();
+    }
+  });
 
   function humanWon() {
     if (!state || !state.winners) return false;
@@ -203,7 +313,8 @@
   /* 胜利喝彩：彩带飘落 + 欢呼语音 */
   function celebrateWin() {
     try {
-      if (document.createElement && document.body) {
+      var reducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      if (!reducedMotion && document.createElement && document.body) {
         var layer = document.createElement('div');
         layer.className = 'confetti-layer';
         var colors = ['#ffd76a', '#ff8a5e', '#7ee08a', '#8ecbff',
@@ -274,6 +385,9 @@
 
   function render() {
     if (!state) return;
+    if ($('app').style.setProperty) {
+      $('app').style.setProperty('--dur-play', Math.min(220, state.settings.bot_delay_ms * 0.6) + 'ms');
+    }
     renderTopbar();
     renderWelcome();
     var over = state.phase === 'round_over';
@@ -299,15 +413,16 @@
   function renderWelcome() {
     var el = $('welcomeModal');
     if (welcomeDismissed || !isFreshGame()) {
-      if (!el.classList.contains('hidden')) el.classList.add('hidden');
+      if (!el.classList.contains('hidden')) closeModal('welcomeModal');
     } else {
-      el.classList.remove('hidden');
+      openModal('welcomeModal');
     }
   }
 
   $('btnStartGame').addEventListener('click', function () {
     welcomeDismissed = true;
-    $('welcomeModal').classList.add('hidden');
+    closeModal('welcomeModal');
+    $('btnBid0').focus();
   });
 
   // 结算时清空手牌（减少残留）
@@ -393,6 +508,7 @@
           lastPlaySigs[p] = '';
           $('lastPlay' + p).innerHTML = '';
         }
+        $('lastPlay' + p).classList.remove('long-play');
         continue;
       }
       var lp = state.last_plays[p];
@@ -400,14 +516,17 @@
       if (sig !== lastPlaySigs[p]) {
         lastPlaySigs[p] = sig;
         var el = $('lastPlay' + p);
+        // 普通牌型保持原来的桌面尺寸；只有超长牌型才压缩进固定槽位。
+        el.classList.toggle('long-play', !!lp && !lp.passed && lp.cards.length > 10);
         if (!lp) {
           el.innerHTML = '';
         } else if (lp.passed) {
           el.innerHTML = '<span class="pass-chip">不出</span>';
         } else {
-          el.innerHTML = lp.cards.map(function (c) {
+          el.innerHTML = '<span class="played-cards" style="--played-count:' + lp.cards.length +
+            '" role="img" aria-label="' + NAME[p] + '出牌：' + lp.cards.map(DDZ.cardLabel).join('、') + '">' + lp.cards.map(function (c) {
             return '<span class="mini anim">' + DDZ.cardSVG(c) + '</span>';
-          }).join('');
+          }).join('') + '</span>';
         }
         // 语音播报：任何一方出牌/不出都播报（跳过首次渲染）
         if (voiceReady) announcePlay(lp);
@@ -474,7 +593,7 @@
   }
 
   function renderHand() {
-    var cards = state.hands['0'] || [];
+    var cards = state.hands[String(state.human)] || [];
     var csig = cards.map(function (c) { return c.id; }).join(',');
     var ssig = Array.from(selection).sort(function (a, b) { return a - b; }).join(',');
 
@@ -492,8 +611,9 @@
       // 避免选中/悬停的 transform 创建 stacking context 后盖住旁边的牌
       $('hand').innerHTML = cards.map(function (c, i) {
         var sel = selection.has(c.id) ? ' selected' : '';
-        return '<div class="card' + sel + '" data-id="' + c.id +
-          '" data-idx="' + i + '" style="z-index:' + (i + 1) + '">' + DDZ.cardSVG(c.id) + '</div>';
+        return '<button type="button" class="card' + sel + '" data-id="' + c.id +
+          '" aria-label="' + DDZ.cardLabel(c.id) + '" aria-pressed="' + selection.has(c.id) +
+          '" data-idx="' + i + '" style="z-index:' + (i + 1) + '">' + DDZ.cardSVG(c.id) + '</button>';
       }).join('');
       handSelSig = ssig;
     } else if (ssig !== handSelSig) {
@@ -503,6 +623,7 @@
       for (var i = 0; i < nodes.length; i++) {
         var nid = Number(nodes[i].getAttribute('data-id'));
         nodes[i].classList.toggle('selected', selection.has(nid));
+        nodes[i].setAttribute('aria-pressed', String(selection.has(nid)));
       }
     }
   }
@@ -567,7 +688,7 @@
   function renderResult() {
     if (state.phase !== 'round_over' || !state.winners) {
       if (!document.getElementById('resultModal').classList.contains('hidden')) {
-        document.getElementById('resultModal').classList.add('hidden');
+        closeModal('resultModal');
       }
       return;
     }
@@ -588,7 +709,7 @@
     parts.push(notes.join(' · '));
     parts.push('累计比分：你 ' + state.scores[0] + '　上家 ' + state.scores[2] + '　下家 ' + state.scores[1]);
     $('resultBody').innerHTML = parts.map(function (p) { return '<div>' + p + '</div>'; }).join('');
-    $('resultModal').classList.remove('hidden');
+    openModal('resultModal');
     if (win) celebrateWin();
   }
 
@@ -629,6 +750,7 @@
     var id = Number(node.getAttribute('data-id'));
     var idx = cardIndexById(id);
     if (idx < 0) return;
+    if (typeof node.focus === 'function') node.focus({ preventScroll: true });
     dragState = { anchor: idx, current: idx, moved: false, wasSelected: selection.has(id), id: id };
     // 按住牌时切换为"抓手"光标
     try { if (document.body) document.body.style.cursor = 'grabbing'; } catch (e) {}
@@ -648,7 +770,7 @@
     applyRangeSelection(dragState.anchor, idx);
   });
 
-  var lastDragEndAt = -1e9;   // 最近一次框选结束时间：只抑制"同一手势紧随派发的 click"
+  var lastDragEndAt = -1e9; // 抑制框选松手后由同一手势紧随产生的 click。
 
   function endDrag() {
     if (!dragState) return;
@@ -656,53 +778,52 @@
     dragState = null;
     try { if (document.body) document.body.style.cursor = ''; } catch (e) {}
     if (st.moved) {
-      // 框选松手后，浏览器会在极短时间内（<10ms，同一手势）同步派发一个 click；
-      // 记录时间戳，仅抑制这个紧随的 click，避免拖到牌缝误出牌。
       lastDragEndAt = Date.now();
-    } else {
+    } else if (canSelectCards()) {
       // 单击：切换该牌的选中状态
       toggleSelect(st.id);
     }
   }
   document.addEventListener('pointerup', endDrag);
-  document.addEventListener('pointercancel', endDrag);
+  document.addEventListener('pointercancel', function () {
+    dragState = null;
+    if (document.body) document.body.style.cursor = '';
+  });
+  $('hand').addEventListener('click', function (e) {
+    // 原生按钮的键盘 / 辅助技术点击没有 pointer 手势，detail 为 0。
+    if (e.detail !== 0 || !canSelectCards()) return;
+    var card = e.target && e.target.closest('.card');
+    if (card) toggleSelect(Number(card.getAttribute('data-id')));
+  });
 
-  var lastBlankClickPlay = 0;   // 最近一次"空白单击出牌"时间（用于抑制双击误触不出）
+  var lastBlankClickPlay = -1e9;
 
-  function isBlankArea(t) {
-    return !(t && typeof t.closest === 'function' &&
-             (t.closest('.card') || t.closest('button')));
+  function isBlankArea(target) {
+    return !(target && typeof target.closest === 'function' &&
+      (target.closest('.card') || target.closest('button')));
   }
 
   $('app').addEventListener('click', function (e) {
-    // 仅抑制框选松手同一手势紧随派发的 click（60ms 内）；
-    // 用户随后主动点击空白（移动+按下 > 60ms）立即出牌，无需点两次。
-    if (Date.now() - lastDragEndAt < 60) return;
-    if (!isBlankArea(e.target)) return;
+    if (e.button != null && e.button !== 0) return;
+    if (Date.now() - lastDragEndAt < 60 || !isBlankArea(e.target)) return;
     if (!canActHuman() || selection.size === 0) return;
     lastBlankClickPlay = Date.now();
     playSelectedCards();
   });
 
   $('app').addEventListener('dblclick', function (e) {
-    if (!isBlankArea(e.target)) return;      // 牌上/按钮上不触发
-    if (Date.now() - lastBlankClickPlay < 600) return;  // 刚用空白单击出过牌
+    if (e.button != null && e.button !== 0) return;
+    if (!isBlankArea(e.target) || Date.now() - lastBlankClickPlay < 600) return;
     if (!canActHuman()) return;
     if (!state.can_pass) { toast('现在不能不出（必须出牌）'); return; }
-    postAction({ action: 'pass' }).then(function (res) {
-      if (res.state) { state = res.state; render(); }
-    });
+    submitAction({ action: 'pass' });
   });
 
   function playSelectedCards() {
-    if (selection.size === 0) return;
+    if (!canActHuman() || selection.size === 0) return;
     var cards = Array.from(selection);   // Set → 数组（slice.call 对 Set 无效，会得到空数组）
-    selection = new Set();               // 乐观清空，立即反馈
-    renderHand();
-    renderControls();
-    postAction({ action: 'play', cards: cards }).then(function (res) {
-      if (!res.ok && res.error) toast(res.error, true);
-      if (res.state) { state = res.state; render(); }
+    submitAction({ action: 'play', cards: cards }, function () {
+      selection = new Set(); // 仅在服务端确认成功后清空，非法牌或网络失败保留选择。
     });
   }
 
@@ -712,13 +833,12 @@
   });
 
   $('btnPass').addEventListener('click', function () {
-    postAction({ action: 'pass' }).then(function (res) {
-      if (res.state) { state = res.state; render(); }
-    });
+    if (canActHuman() && state.can_pass) submitAction({ action: 'pass' });
   });
 
   $('btnHint').addEventListener('click', function () {
-    postAction({ action: 'hint' }).then(function (res) {
+    if (!canActHuman()) return;
+    submitAction({ action: 'hint' }, function (res) {
       if (res.hint) {
         if (res.hint.kind === 'bid') {
           if (res.hint.value > 0 && res.hint.value > state.bid_highest) {
@@ -737,22 +857,26 @@
           }
         }
       }
-      if (res.state) { state = res.state; render(); }
     });
   });
 
   for (var v = 0; v <= 3; v++) {
     (function (val) {
       $('btnBid' + v).addEventListener('click', function () {
-        postAction({ action: 'bid', bid: val }).then(function (res) {
-          if (res.state) { state = res.state; render(); }
-        });
+        if (canActHuman()) submitAction({ action: 'bid', bid: val });
       });
     })(v);
   }
 
   function newRound() {
-    postAction({ action: 'new_round' }).then(function (res) {
+    if (actionPending) {
+      newRoundQueued = true;
+      toast('当前操作完成后立即开始新一局');
+      if (currentActionController) currentActionController.abort();
+      return;
+    }
+    submitAction({ action: 'new_round' }, function () {
+      closeModal('resultModal');
       selection = new Set();
       // 重置所有渲染缓存，确保新一局全新渲染、无上一局残留
       lastPlaySigs = ['', '', ''];
@@ -765,8 +889,13 @@
       lastBidEventSig = '';
       handCardsSig = '';
       handSelSig = '';
-      if (res.state) { state = res.state; render(); }
     });
+  }
+
+  function flushQueuedNewRound() {
+    if (!newRoundQueued || actionPending) return;
+    newRoundQueued = false;
+    newRound();
   }
 
   $('btnNewRound').addEventListener('click', function () {
@@ -777,24 +906,24 @@
     newRound();
   });
   $('btnAgain').addEventListener('click', function () {
-    $('resultModal').classList.add('hidden');
     newRound();
   });
   $('btnCloseResult').addEventListener('click', function () {
-    $('resultModal').classList.add('hidden');
+    closeModal('resultModal');
   });
 
   /* ---------------- 设置 ---------------- */
 
   $('btnSettings').addEventListener('click', function () {
+    if (!state) return;
     $('setSpeed').value = state.settings.bot_delay_ms;
     $('speedVal').textContent = (state.settings.bot_delay_ms / 1000).toFixed(1) + ' 秒';
     $('setAuto').checked = state.settings.auto_pilot;
     $('setVoice').checked = voiceEnabled;
-    $('settingsModal').classList.remove('hidden');
+    openModal('settingsModal');
   });
   $('btnCloseSettings').addEventListener('click', function () {
-    $('settingsModal').classList.add('hidden');
+    closeModal('settingsModal');
   });
 
   var delayTimer = null;
@@ -803,11 +932,11 @@
     clearTimeout(delayTimer);
     var ms = Number(this.value);
     delayTimer = setTimeout(function () {
-      postAction({ action: 'set_delay', ms: ms });
+      postAction({ action: 'set_delay', ms: ms }).then(syncSettings).catch(actionError);
     }, 300);
   });
   $('setAuto').addEventListener('change', function () {
-    postAction({ action: 'set_auto', on: this.checked });
+    postAction({ action: 'set_auto', on: this.checked }).then(syncSettings).catch(actionError);
   });
   $('setVoice').addEventListener('change', function () {
     voiceEnabled = this.checked;
@@ -820,6 +949,17 @@
 
   /* ---------------- 启动 ---------------- */
 
+  function syncSettings(res) {
+    if (!res.ok) { toast(res.error || '设置未保存', true); return; }
+    if (res.state) { state = res.state; render(); }
+    schedulePoll(100);
+  }
+
+  document.addEventListener('visibilitychange', function () {
+    clearTimeout(pollTimer);
+    if (!document.hidden) { stateEtag = ''; poll(); }
+    else schedulePoll(1000);
+  });
+
   poll();
-  setInterval(poll, 400);
 })();

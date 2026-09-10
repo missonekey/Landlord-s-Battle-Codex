@@ -10,6 +10,8 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest import mock
+import importlib.util
 import urllib.request
 
 _TEST_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -17,6 +19,10 @@ _REPO = os.path.normpath(os.path.join(_TEST_DIR, os.pardir))
 _START = os.path.join(_REPO, "doudizhu", "scripts", "start_game.py")
 _STOP = os.path.join(_REPO, "doudizhu", "scripts", "stop_game.py")
 PORT_BASE = 9100
+
+_stop_spec = importlib.util.spec_from_file_location('ddz_stop_test', _STOP)
+stop_module = importlib.util.module_from_spec(_stop_spec)
+_stop_spec.loader.exec_module(stop_module)
 
 
 def _env():
@@ -30,8 +36,9 @@ def _env():
 def _ping(port, timeout=0.5):
     try:
         with urllib.request.urlopen(
-                "http://127.0.0.1:%d/api/state" % port, timeout=timeout) as r:
-            return r.status == 200
+                "http://127.0.0.1:%d/api/health" % port, timeout=timeout) as r:
+            data = json.loads(r.read().decode("utf-8"))
+            return r.status == 200 and data.get("app") == "codex-doudizhu"
     except Exception:
         return False
 
@@ -93,6 +100,52 @@ class TestLauncher(unittest.TestCase):
                             capture_output=True, timeout=30)
         self.assertEqual(r4.returncode, 0)
         self.assertIn("没有检测到", r4.stdout.decode())
+
+
+class TestStopSafety(unittest.TestCase):
+    def test_explicit_port_scope_ignores_other_pidfile(self):
+        with mock.patch.dict(stop_module.os.environ,
+                             {"DOUDIZHU_PORT_BASE": "9325"}), \
+                mock.patch.object(stop_module.os.path, 'isfile', return_value=True), \
+                mock.patch('builtins.open', mock.mock_open(
+                    read_data='{"pid":12345,"port":8765}')), \
+                mock.patch.object(stop_module.os, 'kill') as kill, \
+                mock.patch.object(stop_module, '_ping') as ping:
+            self.assertEqual(stop_module._find_via_pidfile(), -1)
+            kill.assert_not_called()
+            ping.assert_not_called()
+
+    def test_stale_pidfile_does_not_signal_unrelated_process(self):
+        with mock.patch.object(stop_module.os.path, 'isfile', return_value=True), \
+                mock.patch('builtins.open', mock.mock_open(read_data='{"pid":12345,"port":8765}')), \
+                mock.patch.object(stop_module.os, 'kill') as kill, \
+                mock.patch.object(stop_module, '_ping', return_value=True), \
+                mock.patch.object(stop_module, '_pid_owns_port', return_value=False):
+            self.assertEqual(stop_module._find_via_pidfile(), -1)
+            kill.assert_called_once_with(12345, 0)
+
+    def test_health_must_identify_game(self):
+        response = mock.MagicMock()
+        response.__enter__.return_value.status = 200
+        response.__enter__.return_value.read.return_value = b'{"app":"unrelated-service"}'
+        with mock.patch.object(stop_module.urllib.request, 'urlopen', return_value=response):
+            self.assertFalse(stop_module._ping(8765))
+
+    def test_old_game_state_is_still_recognized(self):
+        health = mock.MagicMock()
+        health.__enter__.side_effect = urllib.error.HTTPError('', 404, '', {}, None)
+        state = mock.MagicMock()
+        state.__enter__.return_value.status = 200
+        state.__enter__.return_value.read.return_value = (
+            b'{"phase":"playing","round_no":1,"hands":{"0":[]},"hand_counts":[0,1,1]}')
+        with mock.patch.object(stop_module.urllib.request, 'urlopen', side_effect=[health, state]):
+            self.assertTrue(stop_module._ping(8765))
+
+    def test_never_signals_process_group(self):
+        with mock.patch.object(stop_module.os, 'kill') as kill:
+            for pid in [-1, 0, 1]:
+                self.assertFalse(stop_module._kill_pid(pid))
+            kill.assert_not_called()
 
 
 if __name__ == "__main__":

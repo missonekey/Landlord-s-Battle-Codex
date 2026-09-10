@@ -29,8 +29,10 @@ function makeEl(id) {
     style: {},
     _cls: {},
     _ls: {},
-    getAttribute: function () { return null; },
-    setAttribute: function () {},
+    _attrs: {},
+    getAttribute: function (name) { return this._attrs[name] || null; },
+    setAttribute: function (name, value) { this._attrs[name] = value; },
+    focus: function () { document.activeElement = this; },
     querySelectorAll: function () { return []; },
     addEventListener: function (type, fn) {
       (this._ls[type] = this._ls[type] || []).push(fn);
@@ -71,6 +73,8 @@ for (var i = 0; i < ids.length; i++) els[ids[i]] = makeEl(ids[i]);
 
 var docListeners = {};
 var document = {
+  hidden: false,
+  activeElement: null,
   getElementById: function (id) {
     if (!els[id]) throw new Error("getElementById 引用了不存在的 id: " + id);
     return els[id];
@@ -123,7 +127,7 @@ var window = {
 };
 var DDZ = null; // 浏览器中 window.DDZ 即全局 DDZ，这里手动桥接
 var _pollFn = null;
-setTimeout = function () { return 0; };
+setTimeout = function (fn) { if (fn && fn.name === 'poll') _pollFn = fn; return 0; };
 clearTimeout = function () {};
 setInterval = function (fn) { _pollFn = fn; return 1; };
 
@@ -145,12 +149,19 @@ function thenable(v) {
 
 var currentState = readJson("tests/snapshots/bidding.json");
 var lastPostBody = null;
+var actionResult = null;
+var fetchCount = 0;
+var stateNotModified = false;
 fetch = function (url, opts) {
+  fetchCount++;
   var isState = String(url).indexOf("/api/state") >= 0;
   if (!isState && opts) lastPostBody = String(opts.body || "");
   return thenable({
+    ok: true,
+    status: isState && stateNotModified ? 304 : 200,
+    headers: { get: function () { return '"test-etag"'; } },
     json: function () {
-      return isState ? currentState : { ok: true, state: currentState };
+      return isState ? currentState : (actionResult || { ok: true, state: currentState });
     }
   });
 };
@@ -298,56 +309,62 @@ try {
         [0, 1, 2, 3, 4, 5].every(function (i) { return six.indexOf(Number(cardIds[i])) >= 0; }),
         "两次乱序框选累加出牌 6 张 [" + six.join(",") + "]");
 
-  // ---- 框选后点空白出牌（回归防护：曾因 400ms 抑制窗口需点两次） ----
-  dragFromTo(0, 3);   // 框选，设置 lastDragEndAt
-  _fakeNow += 10;     // 10ms 后：同一手势紧随派发的 click
+  // ---- 框选松手的同一 click 要抑制，随后主动点空白应立即出牌 ----
+  dragFromTo(0, 3);
+  _fakeNow += 10;
   lastPostBody = null;
   els.app.fire("click", { target: { closest: function () { return null; } } });
   check(!lastPostBody, "框选松手同一手势的 click 被抑制");
-  _fakeNow += 100;    // 再过 100ms：用户主动点击空白
+  _fakeNow += 100;
   els.app.fire("click", { target: { closest: function () { return null; } } });
-  var dg = JSON.parse(lastPostBody || "{}");
-  check(dg.action === "play" && (dg.cards || []).length === 4 &&
-        [0, 1, 2, 3].every(function (i) { return (dg.cards || []).indexOf(Number(cardIds[i])) >= 0; }),
-        "框选后稍候点空白立即出牌（无需点两次）[" + (dg.cards || []).join(",") + "]");
+  var blankPlay = JSON.parse(lastPostBody || "{}");
+  check(blankPlay.action === "play" && blankPlay.cards.length === 4,
+        "左键单击空白区域出牌");
 
-  // ---- 空白单击 = 出牌（任意空白区域，无需点按钮） ----
-  _fakeNow += 1000;   // 越过框选后的 click 抑制窗口
-  lastPostBody = null;
-  clickCardAt(0);
-  clickCardAt(1);   // 选两张
-  els.app.fire("click", { target: { closest: function () { return null; } } });
-  var bc = JSON.parse(lastPostBody || "{}");
-  check(bc.action === "play" && (bc.cards || []).length === 2 &&
-        [Number(cardIds[0]), Number(cardIds[1])].every(
-          function (id) { return (bc.cards || []).indexOf(id) >= 0; }),
-        "空白单击直接出牌 [" + (bc.cards || []).join(",") + "]");
-  check(els.btnPlay.disabled, "空白出牌后选中清空（出牌按钮禁用）");
-  lastPostBody = null;
-  els.app.fire("click", { target: { closest: function () { return null; } } });
-  check(!lastPostBody, "无选中时空白单击不发请求");
-
-  // ---- 双击空白区域 = 不出（无选中时） ----
-  _fakeNow += 1000;   // 让上一次"空白单击出牌"时间戳过期，双击才生效
+  // ---- 无选牌时左键双击空白区域不出 ----
+  _fakeNow += 1000;
   lastPostBody = null;
   els.app.fire("dblclick", { target: { closest: function () { return null; } } });
-  var dbSent = JSON.parse(lastPostBody || "{}");
-  check(dbSent.action === "pass", "双击空白触发不出");
-  // 双击在牌上不触发
+  var blankPass = JSON.parse(lastPostBody || "{}");
+  check(blankPass.action === "pass", "左键双击空白区域不出");
   lastPostBody = null;
   els.app.fire("dblclick", { target: fakeCard(cardIds[0]) });
-  var db2 = JSON.parse(lastPostBody || "{}");
-  check(!db2 || db2.action !== "pass", "双击在牌上不触发不出");
-  // 刚用空白单击出过牌后，双击被抑制（不会误触发"不出"）
-  lastPostBody = null;
+  check(!lastPostBody, "双击牌面不触发不出");
+
+  // ---- 非法出牌保留完整选择，可直接调整 / 重试 ----
   clickCardAt(0);
   clickCardAt(1);
-  els.app.fire("click", { target: { closest: function () { return null; } } });  // 空白出牌
-  var afterPlay = JSON.parse(lastPostBody || "{}");
-  els.app.fire("dblclick", { target: { closest: function () { return null; } } });
-  var db3 = JSON.parse(lastPostBody || "{}");
-  check(afterPlay.action === "play" && db3.action !== "pass",
-        "空白单击出牌后双击被抑制（不会误不出）");
+  actionResult = { ok: false, error: '不是合法牌型', state: currentState };
+  var rejected = playAndGetCards();
+  check(rejected.length === 2 && !els.btnPlay.disabled, "非法出牌后保留选牌");
+  actionResult = null;
+  var retried = playAndGetCards();
+  check(JSON.stringify(retried) === JSON.stringify(rejected) && els.btnPlay.disabled,
+        "重试提交相同选牌，成功后才清空");
+
+  els.hand.fire('click', { detail: 0, target: fakeCard(cardIds[0]) });
+  check(!els.btnPlay.disabled, '键盘 / 辅助技术点击可选牌');
+  playAndGetCards();
+  check(els.hand.innerHTML.indexOf('aria-pressed=') >= 0 && DDZ.cardLabel(0) === '黑桃 3',
+        '手牌有可读名称和选中语义');
+
+  var beforeHidden = fetchCount;
+  document.hidden = true;
+  window.speechSynthesis._last = null;
+  var hiddenState = JSON.parse(JSON.stringify(currentState));
+  hiddenState.last_plays[2] = { player: 2, passed: false, cards: [0, 13], type: 'pair', main_rank: 3, label: '对子 3' };
+  currentState = hiddenState;
+  _pollFn();
+  check(fetchCount > beforeHidden && window.speechSynthesis._last === '对三',
+        '后台保留低频同步和出牌语音');
+  document.hidden = false;
+  document.fire('visibilitychange');
+  check(fetchCount > beforeHidden, '回到前台立即同步状态');
+  stateNotModified = true;
+  var before304 = els.hand._setCount;
+  _pollFn();
+  check(els.hand._setCount === before304, '304 响应不重建手牌');
+  stateNotModified = false;
 
   // ---- 语音播报：任何一方出牌/不出都触发 Web Speech 播报 ----
   var vs = JSON.parse(JSON.stringify(currentState));
@@ -400,8 +417,12 @@ try {
 
   els.btnSettings.fire("click");
   check(!els.settingsModal.classList.contains("hidden"), "设置弹窗打开");
+  check(document.activeElement === els.setSpeed && els.app.inert, '弹窗打开后聚焦设置并隔离背景');
+  document.fire('keydown', { key: 'Tab', shiftKey: true });
+  check(document.activeElement === els.btnCloseSettings, 'Shift Tab 在弹窗内循环');
   els.btnCloseSettings.fire("click");
   check(els.settingsModal.classList.contains("hidden"), "设置弹窗关闭");
+  check(!els.app.inert, '关闭弹窗后恢复背景操作');
   els.setAuto.fire("change");
   detail.push("  ✓ 切换托管无异常");
 

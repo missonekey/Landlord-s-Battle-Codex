@@ -69,6 +69,13 @@ class TestBidding(unittest.TestCase):
         self.assertEqual(g.deal_no, deal0 + 1)
         self.assertEqual(g.phase, PHASE_BIDDING)
         self.assertNotEqual(g.hands, hands0)  # 重新发牌（极小概率相同，seed 固定）
+        self.assertEqual(g.bid_event, {"kind": "redeal"})
+
+    def test_snapshot_uses_configured_human(self):
+        g = Game(human=1, seed=22)
+        s = g.snapshot()
+        self.assertEqual(list(s["hands"]), ["1"])
+        self.assertEqual(len(s["hands"]["1"]), 17)
 
     def test_three_point_wins(self):
         g = Game(seed=3)
@@ -215,11 +222,28 @@ class TestScoring(unittest.TestCase):
         self.assertFalse(g.anti_spring)
         # 春天 x2，炸弹 0 → mult=2, stake=2*2=4
         self.assertEqual(g.multiplier, 2)
+        self.assertEqual(g.snapshot()["multiplier"], 2)
         self.assertEqual(g.round_scores[0], 8)
         self.assertEqual(g.round_scores[1], -4)
         self.assertEqual(g.round_scores[2], -4)
         self.assertEqual(g.scores[0], 8)
         self.assertEqual(sum(g.round_scores), 0)
+
+    def test_live_multiplier_and_spring_share_same_value(self):
+        bomb = mk([(3, 0), (3, 1), (3, 2), (3, 3)])
+        g = self._setup(0, [bomb + [52, 53, 1], [5, 6], [7, 8]])
+        g.play(0, bomb)
+        self.assertEqual(g.snapshot()['multiplier'], 2)
+        g.pass_turn(1)
+        g.pass_turn(2)
+        g.play(0, [52, 53])
+        self.assertEqual(g.snapshot()['multiplier'], 4)
+        g.pass_turn(1)
+        g.pass_turn(2)
+        g.play(0, [1])
+        self.assertTrue(g.spring)
+        self.assertEqual(g.snapshot()['multiplier'], 8)
+        self.assertEqual(g.round_scores, [16, -8, -8])
 
     def test_anti_spring(self):
         # 地主只出过一手（首出），随后农民一家走完（反春）
@@ -242,6 +266,7 @@ class TestScoring(unittest.TestCase):
         self.assertFalse(g.spring)
         # 反春 x2 → mult=2, stake=1*2=2
         self.assertEqual(g.multiplier, 2)
+        self.assertEqual(g.snapshot()["multiplier"], 2)
         self.assertEqual(g.round_scores[0], -4)
         self.assertEqual(g.round_scores[1], 2)
         self.assertEqual(g.round_scores[2], 2)

@@ -14,7 +14,7 @@ if _GAME_DIR not in sys.path:
 
 import ai  # noqa: E402
 import rules  # noqa: E402
-from cards import new_deck  # noqa: E402
+from cards import make_card, new_deck, rank_of  # noqa: E402
 
 
 def random_hand(rng, size=17):
@@ -54,6 +54,10 @@ class TestBid(unittest.TestCase):
 
 
 class TestSuggestLead(unittest.TestCase):
+    def test_keeps_triple_with_wing(self):
+        hand = [make_card(3, s) for s in range(3)] + [make_card(7, 0), make_card(15, 0)]
+        self.assertEqual(rules.classify(ai.suggest_lead(hand)).type, 'triple_single')
+
     def test_always_legal(self):
         rng = random.Random(7)
         for _ in range(800):
@@ -77,6 +81,19 @@ class TestSuggestLead(unittest.TestCase):
         # 王炸 → 全出
         cards = ai.suggest_lead([52, 53])
         self.assertEqual(sorted(cards), [52, 53])
+
+    def test_prefers_straight_over_single(self):
+        hand = [make_card(r, 0) for r in (3, 4, 5, 6, 7, 13)]
+        cards = ai.suggest_lead(hand)
+        self.assertEqual(rules.classify(cards).type, rules.COMBO_STRAIGHT)
+        self.assertEqual([rank_of(c) for c in cards], [3, 4, 5, 6, 7])
+
+    def test_prefers_pair_chain_over_high_single(self):
+        hand = ([make_card(r, suit) for r in (3, 4, 5) for suit in (0, 1)]
+                + [make_card(13, 0)])
+        cards = ai.suggest_lead(hand)
+        self.assertEqual(rules.classify(cards).type, rules.COMBO_PAIR_CHAIN)
+        self.assertEqual(len(cards), 6)
 
 
 class TestSuggestFollow(unittest.TestCase):

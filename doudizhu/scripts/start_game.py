@@ -35,12 +35,20 @@ PORT_RANGE = 20
 
 def _ping(port: int, timeout: float = 0.4) -> bool:
     """探测指定端口是否在运行斗地主服务器。"""
-    try:
-        with urllib.request.urlopen(
-                "http://127.0.0.1:%d/api/state" % port, timeout=timeout) as r:
-            return r.status == 200
-    except Exception:
-        return False
+    for endpoint in ("api/health", "api/state"):
+        try:
+            with urllib.request.urlopen(
+                    "http://127.0.0.1:%d/%s" % (port, endpoint), timeout=timeout) as r:
+                data = json.loads(r.read().decode("utf-8"))
+                if r.status != 200 or not isinstance(data, dict):
+                    continue
+                if endpoint == "api/health" and data.get("app") == "codex-doudizhu":
+                    return True
+                if endpoint == "api/state" and {"phase", "round_no", "hands", "hand_counts"} <= set(data):
+                    return True  # 兼容升级前没有 /api/health 的斗地主服务。
+        except Exception:
+            continue
+    return False
 
 
 def _port_base() -> int:

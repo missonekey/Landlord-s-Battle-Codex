@@ -115,8 +115,9 @@ class Game:
             self._log("三家都不叫，重新发牌。")
             if self.deal_no >= MAX_DEALS_PER_ROUND:
                 raise RuntimeError("重新发牌次数过多")
-            self.bid_event = {"kind": "redeal"}
             self._deal()
+            # _deal() 会重置局内事件；重新写回事件，确保前端能够展示/播报重新发牌。
+            self.bid_event = {"kind": "redeal"}
             return
 
         if self.bidder is not None and self.pass_count == 2:
@@ -164,6 +165,7 @@ class Game:
             self.bombs_used += 1
         elif combo.type == rules.COMBO_ROCKET:
             self.rockets_used += 1
+        self.multiplier = 2 ** (self.bombs_used + self.rockets_used)
 
         self.last_combo = combo
         self.last_player = player
@@ -270,8 +272,12 @@ class Game:
             farmers = [p for p in range(3) if p != self.landlord]
             ctx["opp_min"] = min(len(self.hands[p]) for p in farmers)
         # 记牌：每张牌值还剩多少在外面（大师级 AI 用）
-        ctx["remaining"] = {r: (1 if r >= RANK_JOKER_SMALL else 4) - self.played_ranks[r]
-                            for r in range(3, RANK_JOKER_BIG + 1)}
+        own_ranks = Counter(rank_of(c) for c in self.hands[player])
+        ctx["remaining"] = {
+            r: max(0, (1 if r >= RANK_JOKER_SMALL else 4)
+                   - self.played_ranks[r] - own_ranks[r])
+            for r in range(3, RANK_JOKER_BIG + 1)
+        }
         return ctx
 
     def bot_move(self, player: int) -> None:
@@ -331,8 +337,9 @@ class Game:
                 "label": self.last_combo.describe(),
             },
             "hands": {
-                "0": [{"id": c, "rank": rank_of(c),
-                       "suit": (c // 13) if c < 52 else None} for c in self.hands[0]],
+                str(self.human): [{"id": c, "rank": rank_of(c),
+                                   "suit": (c // 13) if c < 52 else None}
+                                  for c in self.hands[self.human]],
             },
             "hand_counts": [len(h) for h in self.hands],
             "bottom_visible": self.landlord is not None,
@@ -341,7 +348,7 @@ class Game:
             "last_plays": self.last_plays,
             "bombs_used": self.bombs_used,
             "rockets_used": self.rockets_used,
-            "multiplier": 2 ** (self.bombs_used + self.rockets_used),
+            "multiplier": self.multiplier,
             "spring": self.spring,
             "anti_spring": self.anti_spring,
             "scores": list(self.scores),

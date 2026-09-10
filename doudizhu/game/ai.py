@@ -196,7 +196,35 @@ def suggest_lead(hand, ctx: Optional[dict] = None) -> List[int]:
         if p:
             return p
 
-    # 3) 孤张单牌（优先非 2、非王的小牌；再优先"安全牌"——外面没有更大的牌）
+    # 3) 优先一次打出更多结构牌。旧顺序先返回孤张/对子/三张，导致下面的
+    # 顺子、连对、飞机分支除“一手走完”外几乎永远不可达。
+    structures = []
+    for start, k in _pure_airplanes(counts):
+        cards = _pick_lead_airplane(start, k, hand, counts, ids)
+        structures.append((len(cards), -start, 3, cards))
+    for start, k in _pure_chains(counts):
+        cards = []
+        for r in range(start, start + k):
+            cards.extend(ids[r][:2])
+        structures.append((len(cards), -start, 2, cards))
+    for start, length in _pure_straights(counts):
+        cards = [ids[r][0] for r in range(start, start + length)]
+        structures.append((len(cards), -start, 1, cards))
+    for r in sorted(counts):
+        if counts[r] != 3:
+            continue
+        cards = ids[r][:3]
+        singles = [x for x in sorted(counts) if counts[x] == 1 and x <= 14]
+        pairs = [x for x in sorted(counts) if counts[x] == 2 and x <= 14]
+        if singles:
+            cards += ids[singles[0]][:1]
+        elif pairs:
+            cards += ids[pairs[0]][:2]
+        structures.append((len(cards), -r, 0, cards))
+    if structures:
+        return max(structures, key=lambda item: item[:3])[3]
+
+    # 4) 孤张单牌（优先非 2、非王的小牌；再优先"安全牌"——外面没有更大的牌）
     singles = [r for r in sorted(counts) if counts[r] == 1]
     if singles:
         prefer = [r for r in singles if r <= 14]
@@ -206,47 +234,17 @@ def suggest_lead(hand, ctx: Optional[dict] = None) -> List[int]:
         r = (safe or pool)[0]
         return [ids[r][0]]
 
-    # 4) 对子
-    pairs = [r for r in sorted(counts) if 2 <= counts[r] < 4]
+    # 5) 对子
+    pairs = [r for r in sorted(counts) if counts[r] == 2]
     if pairs:
         return ids[pairs[0]][:2]
 
-    # 5) 三张（有孤张就三带一）
-    triples = [r for r in sorted(counts) if 3 <= counts[r] < 4]
-    if triples:
-        r = triples[0]
-        wing = [x for x in sorted(counts) if counts[x] == 1 and x != r]
-        if wing:
-            return ids[r][:3] + [ids[wing[0]][0]]
-        return ids[r][:3]
-
-    # 6) 顺子（孤张组成，选最长、起点最小）
-    straights = _pure_straights(counts)
-    if straights:
-        start, length = max(straights, key=lambda t: (t[1], -t[0]))
-        return [ids[r][0] for r in range(start, start + length)]
-
-    # 7) 连对
-    chains = _pure_chains(counts)
-    if chains:
-        start, k = max(chains, key=lambda t: (t[1], -t[0]))
-        out = []
-        for r in range(start, start + k):
-            out.extend(ids[r][:2])
-        return out
-
-    # 8) 飞机
-    planes = _pure_airplanes(counts)
-    if planes:
-        start, k = max(planes, key=lambda t: (t[1], -t[0]))
-        return _pick_lead_airplane(start, k, hand, counts, ids)
-
-    # 9) 只剩炸弹/王炸
+    # 6) 只剩炸弹/王炸
     if all(n == 4 for n in counts.values()) or set(hand) == {JOKER_SMALL_ID, JOKER_BIG_ID}:
         r = min(counts)
         return ids[r][:4]
 
-    # 10) 兜底：拆最小的牌
+    # 7) 兜底：拆最小的牌
     r = min(counts)
     if counts[r] >= 2:
         return ids[r][:2]

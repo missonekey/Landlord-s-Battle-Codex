@@ -20,6 +20,11 @@
     return RANK_TEXT[cardInfo(id).rank];
   }
 
+  function cardLabel(id) {
+    var info = cardInfo(id);
+    return (info.suit === null ? '' : ['黑桃', '红桃', '梅花', '方块'][info.suit] + ' ') + RANK_TEXT[info.rank];
+  }
+
   function colorOf(info) {
     if (info.suit === null) return info.rank === 17 ? '#d0342c' : '#20242b';
     return SUIT_RED[info.suit] ? '#d0342c' : '#20242b';
@@ -128,6 +133,7 @@
     cardSVG: cardSVG,
     backSVG: function () { return '<svg viewBox="0 0 100 140" class="card-svg" aria-hidden="true">' + backSVG() + '</svg>'; },
     cardInfo: cardInfo,
+    cardLabel: cardLabel,
     rankName: rankName,
     RANK_TEXT: RANK_TEXT,
     SUIT_TEXT: SUIT_TEXT,

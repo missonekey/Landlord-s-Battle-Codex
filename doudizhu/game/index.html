@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>斗地主 · Dou Dizhu</title>
 <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="css/style.css">
@@ -44,7 +44,7 @@
 
       <section class="center-head">
         <div class="bottom-cards" id="bottomCards"></div>
-        <div class="status" id="status">正在发牌…</div>
+        <div class="status" id="status" role="status" aria-live="polite" aria-atomic="true">正在发牌…</div>
         <div class="mult-row" id="multRow"></div>
         <div class="log-line" id="logLine"></div>
       </section>
@@ -95,7 +95,7 @@
         <div class="hand-count" id="handCount"></div>
       </div>
 
-      <div class="hand" id="hand"></div>
+      <div class="hand" id="hand" role="group" aria-label="你的手牌，可用 Tab 切换，空格或回车选牌"></div>
 
       <!-- 操作栏 -->
       <footer class="controls" id="controls">
@@ -104,7 +104,7 @@
           <button id="btnPlay" class="btn primary" type="button">出牌</button>
           <button id="btnHint" class="btn ghost" type="button">提示</button>
         </div>
-        <div class="ctrl-hint" id="ctrlHint"></div>
+        <div class="ctrl-hint" id="ctrlHint" role="status"></div>
       </footer>
     </section>
 
@@ -113,10 +113,10 @@
 </div>
 
 <!-- 开始游戏弹窗（页面打开且游戏未开始时显示） -->
-<div class="modal-mask" id="welcomeModal">
+<div class="modal-mask" id="welcomeModal" role="dialog" aria-modal="true" aria-labelledby="welcomeTitle" aria-describedby="welcomeBody">
   <div class="modal">
-    <div class="modal-title">划水快乐，勤劳的人！</div>
-    <div class="modal-body">欢迎来到斗地主，祝你牌运亨通 🎉</div>
+    <div class="modal-title" id="welcomeTitle">划水快乐，勤劳的人！</div>
+    <div class="modal-body" id="welcomeBody">欢迎来到斗地主，祝你牌运亨通 🎉</div>
     <div class="modal-actions">
       <button id="btnStartGame" class="btn primary" type="button">开始游戏</button>
     </div>
@@ -124,7 +124,7 @@
 </div>
 
 <!-- 结算弹窗 -->
-<div class="modal-mask hidden" id="resultModal">
+<div class="modal-mask hidden" id="resultModal" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="resultTitle" aria-describedby="resultBody">
   <div class="modal">
     <div class="modal-title" id="resultTitle"></div>
     <div class="modal-body" id="resultBody"></div>
@@ -136,9 +136,9 @@
 </div>
 
 <!-- 设置弹窗 -->
-<div class="modal-mask hidden" id="settingsModal">
+<div class="modal-mask hidden" id="settingsModal" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="settingsTitle">
   <div class="modal">
-    <div class="modal-title">设置</div>
+    <div class="modal-title" id="settingsTitle">设置</div>
     <div class="modal-body settings-body">
       <label class="setting-row">
         <span>电脑出牌速度</span>
@@ -161,7 +161,7 @@
   </div>
 </div>
 
-<div class="toast hidden" id="toast"></div>
+<div class="toast hidden" id="toast" role="status" aria-live="polite" aria-atomic="true"></div>
 
 <script src="js/render.js"></script>
 <script src="js/main.js"></script>
